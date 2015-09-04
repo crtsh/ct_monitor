@@ -1,2 +1,2 @@
 # ct_monitor
-A [Certificate Transparency](http://www.certificate-transparency.org/) log monitor
+[Certificate Transparency](http://www.certificate-transparency.org/) log monitor
