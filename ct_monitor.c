@@ -231,7 +231,7 @@ int main(
 	char* t_pointer1;
 	char* t_b64Data;
 	char* t_data = NULL;
-	uint32_t t_totalLength;
+	int32_t t_totalLength;
 
 	X509* t_x509 = NULL;
 	uint32_t t_certSize;
@@ -588,11 +588,12 @@ int main(
 				t_pointer1 += 3;
 
 				/* Parse each CA Certificate */
-				while (t_pointer1 < (t_data + t_totalLength)) {
+				while (t_totalLength > 0) {
 					t_certSize = 0;
 					memcpy(((char*)&t_certSize) + 1, t_pointer1, 3);
 					t_certSize = be32toh(t_certSize);
 
+					t_totalLength -= 3;
 					t_pointer1 += 3;
 					t_pointer = t_pointer1;
 					
@@ -640,6 +641,7 @@ int main(
 
 					printf("\n");
 
+					t_totalLength -= (t_pointer - t_pointer1);
 					t_pointer1 = t_pointer;
 				}
 
