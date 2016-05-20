@@ -221,7 +221,7 @@ int main(
 	json_object* j_extraData = NULL;
 	array_list* t_entriesArr = NULL;
 	uint32_t t_entryID;
-	uint32_t t_confirmedEntryID;
+	uint32_t t_confirmedEntryID = -1;
 	uint64_t t_timestamp;
 	int64_t t_sthTimestamp;
 	int t_treeSize;
@@ -704,13 +704,11 @@ int main(
 		sprintf(
 			t_query[0],
 			"UPDATE ct_log"
-				" SET LATEST_ENTRY_ID=%d,"
-				" LATEST_UPDATE=statement_timestamp(),"
+				" SET LATEST_UPDATE=statement_timestamp(),"
 				" LATEST_STH_TIMESTAMP=TIMESTAMP WITH TIME ZONE 'epoch'"
 					" + interval'%" LENGTH64 "d seconds'"
 					" + interval'%" LENGTH64 "d milliseconds'"
 				" WHERE ID=%s",
-			t_entryID,
 			t_sthTimestamp / 1000,
 			t_sthTimestamp % 1000,
 			PQgetvalue(t_PGresult_select, i, 0)
@@ -734,10 +732,8 @@ label_exit:
 			sprintf(
 				t_query[0],
 				"UPDATE ct_log"
-					" SET LATEST_ENTRY_ID=%d,"
-					" LATEST_UPDATE=statement_timestamp()"
+					" SET LATEST_UPDATE=statement_timestamp()"
 					" WHERE ID=%s",
-				t_confirmedEntryID,
 				PQgetvalue(t_PGresult_select, i, 0)
 			);
 			t_PGresult = PQexec(t_PGconn, t_query[0]);
