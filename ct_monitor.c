@@ -428,6 +428,24 @@ int main(
 				goto label_exit;
 			}
 
+			/* Update the "Last Contacted" timestamp */
+			sprintf(
+				t_query[0],
+				"UPDATE ct_log"
+					" SET LATEST_UPDATE=statement_timestamp()"
+					" WHERE ID=%s",
+				PQgetvalue(t_PGresult_select, i, 0)
+			);
+			t_PGresult = PQexec(t_PGconn, t_query[0]);
+			if (PQresultStatus(t_PGresult) != PGRES_COMMAND_OK) {
+				/* The SQL query failed */
+				printError(
+					"UPDATE Query failed",
+					PQerrorMessage(t_PGconn)
+				);
+			}
+			PQclear(t_PGresult);
+
 			/* Parse the JSON response */
 			j_getEntries = json_tokener_parse(t_responseBuffer.data);
 			if (!json_object_object_get_ex(j_getEntries, "entries",
@@ -701,6 +719,8 @@ int main(
 		else
 			t_entryID = t_confirmedEntryID;
 
+		/* Update the "Latest STH" timestamp, now that we've processed
+		  all of the entries covered by this STH */
 		sprintf(
 			t_query[0],
 			"UPDATE ct_log"
