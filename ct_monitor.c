@@ -511,6 +511,10 @@ int main(
 						printError("Failed to decode EE cert", t_b64Data);
 						goto label_exit;
 					}
+					if (t_certSize != (t_pointer - (t_data + 15))) {
+						printError("Additional data after EE cert", t_b64Data);
+						t_certSize = t_pointer - (t_data + 15);
+					}
 
 					t_subjectName = X509_NAME_oneline(
 						X509_get_subject_name(t_x509), NULL, 0
@@ -574,6 +578,10 @@ int main(
 						printError("Failed to decode Precertificate", t_b64Data);
 						goto label_exit;
 					}
+					if (t_certSize != (t_pointer - t_pointer1)) {
+						printError("Additional data after Precertificate", t_b64Data);
+						t_certSize = t_pointer - t_pointer1;
+					}
 
 					t_subjectName = X509_NAME_oneline(
 						X509_get_subject_name(t_x509), NULL, 0
@@ -622,6 +630,10 @@ int main(
 					if (!t_x509) {
 						printError("Failed to decode CA cert", t_b64Data);
 						goto label_exit;
+					}
+					if (t_certSize != (t_pointer - t_pointer1)) {
+						printError("Additional data after CA cert", t_b64Data);
+						t_certSize = t_pointer - t_pointer1;
 					}
 
 					t_subjectName = X509_NAME_oneline(
