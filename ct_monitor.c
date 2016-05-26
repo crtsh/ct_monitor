@@ -194,6 +194,8 @@ static int compareSHA256Hashes(
 
 
 int main(
+	int argc,
+	char** argv
 )
 {
 	PGconn* t_PGconn = NULL;
@@ -274,12 +276,26 @@ int main(
 	printError("Connected OK", NULL);
 
 	/* Get the latest CT Entry ID that we've added to the DB already */
-	t_PGresult_select = PQexec(
-		t_PGconn,
+	sprintf(
+		t_query[0],
 		"SELECT ctl.ID, ctl.URL, ctl.LATEST_ENTRY_ID, ctl.NAME"
 			" FROM ct_log ctl"
 			" WHERE ctl.IS_ACTIVE"
+	);
+	if (argc > 1)	/* Only process one log */
+		sprintf(
+			t_query[0] + strlen(t_query[0]),
+				" AND ctl.ID = %s",
+			argv[1]
+		);
+	else		/* Process all logs */
+		strcat(
+			t_query[0],
 			" ORDER BY ctl.ID"
+		);
+
+	t_PGresult_select = PQexec(
+		t_PGconn, t_query[0]
 	);
 	if (PQresultStatus(t_PGresult_select) != PGRES_TUPLES_OK) {
 		/* The SQL query failed */
