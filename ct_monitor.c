@@ -518,27 +518,30 @@ int main(
 					memcpy(((char*)&t_certSize) + 1, t_data + 12, 3);
 					t_certSize = be32toh(t_certSize);
 
+					printf("%d: ", (t_entryID + j));
+
 					t_pointer = t_data + 15;
 					t_x509 = d2i_X509(
 						NULL, (const unsigned char**)&t_pointer,
 						t_certSize
 					);
-					if (!t_x509) {
+					if (t_x509) {
+						t_subjectName = X509_NAME_oneline(
+							X509_get_subject_name(t_x509), NULL, 0
+						);
+						if (t_subjectName) {
+							printf("%s\n", t_subjectName);
+							OPENSSL_free(t_subjectName);
+						}
+						X509_free(t_x509);
+						if (t_certSize != (t_pointer - (t_data + 15))) {
+							printError("Additional data after EE cert", t_b64Data);
+							t_certSize = t_pointer - (t_data + 15);
+						}
+					}
+					else
 						printError("Failed to decode EE cert", t_b64Data);
-						goto label_exit;
-					}
-					if (t_certSize != (t_pointer - (t_data + 15))) {
-						printError("Additional data after EE cert", t_b64Data);
-						t_certSize = t_pointer - (t_data + 15);
-					}
 
-					t_subjectName = X509_NAME_oneline(
-						X509_get_subject_name(t_x509), NULL, 0
-					);
-					printf("%d: %s\n", (t_entryID + j), t_subjectName);
-					X509_free(t_x509);
-					if (t_subjectName)
-						OPENSSL_free(t_subjectName);
 
 					/* Construct the "INSERT" query */
 					sprintf(t_query[0],
