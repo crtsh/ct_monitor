@@ -264,7 +264,7 @@ int main(
 
 	/* Connect to the database */
 	t_PGconn = PQconnectdb(
-		"user=crtsh dbname=certwatch host=/run/postgresql/9.4/"
+		"user=crtsh dbname=certwatch"
 			" connect_timeout=5 client_encoding=auto"
 			" application_name=ct_monitor"
 	);
