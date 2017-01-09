@@ -226,7 +226,7 @@ int main(
 	uint32_t t_confirmedEntryID = -1;
 	uint64_t t_timestamp;
 	int64_t t_sthTimestamp;
-	int t_treeSize;
+	int64_t t_treeSize;
 	uint16_t t_logEntryType;
 	char t_temp[255];
 	char* t_pointer;
@@ -392,8 +392,8 @@ int main(
 		j_getSTH = json_tokener_parse(t_responseBuffer.data);
 		if (!json_object_object_get_ex(j_getSTH, "tree_size", &j_treeSize))
 			goto label_exit;
-		t_treeSize = json_object_get_int(j_treeSize);
-		printf("Current Tree Size: %d\n", t_treeSize);
+		t_treeSize = json_object_get_int64(j_treeSize);
+		printf("Current Tree Size: %" LENGTH64 "d\n", t_treeSize);
 		if (!json_object_object_get_ex(j_getSTH, "timestamp", &j_timestamp))
 			goto label_exit;
 		t_sthTimestamp = json_object_get_int64(j_timestamp);
@@ -410,9 +410,34 @@ int main(
 
 		/* TODO: Verify the STH signature */
 
+		/* Update "Latest STH", "Latest Entry #" and "Last Contacted" */
+		sprintf(
+			t_query[0],
+			"UPDATE ct_log"
+				" SET LATEST_UPDATE=statement_timestamp(),"
+					" TREE_SIZE=%" LENGTH64 "d,"
+					" LATEST_STH_TIMESTAMP=TIMESTAMP WITH TIME ZONE 'epoch'"
+						" + interval'%" LENGTH64 "d seconds'"
+						" + interval'%" LENGTH64 "d milliseconds'"
+				" WHERE ID=%s",
+			t_treeSize,
+			t_sthTimestamp / 1000,
+			t_sthTimestamp % 1000,
+			PQgetvalue(t_PGresult_select, i, 0)
+		);
+		t_PGresult = PQexec(t_PGconn, t_query[0]);
+		if (PQresultStatus(t_PGresult) != PGRES_COMMAND_OK) {
+			/* The SQL query failed */
+			printError(
+				"UPDATE Query failed",
+				PQerrorMessage(t_PGconn)
+			);
+		}
+		PQclear(t_PGresult);
+
 		for (t_entryID++; t_entryID < t_treeSize; t_entryID = t_confirmedEntryID + 1) {
 			sprintf(
-				t_temp, "%s/ct/v1/get-entries?start=%d&end=%d",
+				t_temp, "%s/ct/v1/get-entries?start=%d&end=%" LENGTH64 "d",
 				PQgetvalue(t_PGresult_select, i, 1), t_entryID,
 				(t_treeSize > (t_entryID + 1023)) ?
 					(t_entryID + 1023) : (t_treeSize - 1)
@@ -749,55 +774,11 @@ int main(
 			t_entryID--;
 		else
 			t_entryID = t_confirmedEntryID;
-
-		/* Update the "Latest STH" timestamp, now that we've processed
-		  all of the entries covered by this STH */
-		sprintf(
-			t_query[0],
-			"UPDATE ct_log"
-				" SET LATEST_UPDATE=statement_timestamp(),"
-				" LATEST_STH_TIMESTAMP=TIMESTAMP WITH TIME ZONE 'epoch'"
-					" + interval'%" LENGTH64 "d seconds'"
-					" + interval'%" LENGTH64 "d milliseconds'"
-				" WHERE ID=%s",
-			t_sthTimestamp / 1000,
-			t_sthTimestamp % 1000,
-			PQgetvalue(t_PGresult_select, i, 0)
-		);
-		t_PGresult = PQexec(t_PGconn, t_query[0]);
-		if (PQresultStatus(t_PGresult) != PGRES_COMMAND_OK) {
-			/* The SQL query failed */
-			printError(
-				"UPDATE Query failed",
-				PQerrorMessage(t_PGconn)
-			);
-		}
-		PQclear(t_PGresult);
 	}
 
 	t_returnCode = EXIT_SUCCESS;
 
 label_exit:
-	if (t_returnCode == EXIT_FAILURE)
-		if (t_confirmedEntryID != -1) {
-			sprintf(
-				t_query[0],
-				"UPDATE ct_log"
-					" SET LATEST_UPDATE=statement_timestamp()"
-					" WHERE ID=%s",
-				PQgetvalue(t_PGresult_select, i, 0)
-			);
-			t_PGresult = PQexec(t_PGconn, t_query[0]);
-			if (PQresultStatus(t_PGresult) != PGRES_COMMAND_OK) {
-				/* The SQL query failed */
-				printError(
-					"UPDATE Query failed",
-					PQerrorMessage(t_PGconn)
-				);
-			}
-			PQclear(t_PGresult);
-		}
-
 	printError("Terminated", NULL);
 
 	/* Clear the query results */
