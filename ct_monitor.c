@@ -346,9 +346,6 @@ int main(
 		printError(t_temp, PQgetvalue(t_PGresult_select, i, 3));
 		CURL_EASY_SETOPT(CURLOPT_URL, t_temp)
 
-		/* Use IPv4 rather than IPv6 */
-		CURL_EASY_SETOPT(CURLOPT_IPRESOLVE, CURL_IPRESOLVE_V4)
-
 		/* SETUP CURL HTTP OPTIONS */
 		/* CURLOPT_FOLLOWLOCATION: Don't follow "Location:" redirects */
 		CURL_EASY_SETOPT(CURLOPT_FOLLOWLOCATION, 0)
@@ -439,8 +436,8 @@ int main(
 			sprintf(
 				t_temp, "%s/ct/v1/get-entries?start=%d&end=%" LENGTH64 "d",
 				PQgetvalue(t_PGresult_select, i, 1), t_entryID,
-				(t_treeSize > (t_entryID + 1023)) ?
-					(t_entryID + 1023) : (t_treeSize - 1)
+				(t_treeSize > (t_entryID + 255)) ?
+					(t_entryID + 255) : (t_treeSize - 1)
 			);
 			printError(t_temp, NULL);
 
