@@ -413,9 +413,9 @@ int main(
 			"UPDATE ct_log"
 				" SET LATEST_UPDATE=statement_timestamp(),"
 					" TREE_SIZE=%" LENGTH64 "d,"
-					" LATEST_STH_TIMESTAMP=TIMESTAMP WITH TIME ZONE 'epoch'"
+					" LATEST_STH_TIMESTAMP=(TIMESTAMP WITH TIME ZONE 'epoch'"
 						" + interval'%" LENGTH64 "d seconds'"
-						" + interval'%" LENGTH64 "d milliseconds'"
+						" + interval'%" LENGTH64 "d milliseconds') AT TIME ZONE 'UTC'"
 				" WHERE ID=%s",
 			t_treeSize,
 			t_sthTimestamp / 1000,
