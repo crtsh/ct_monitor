@@ -411,7 +411,7 @@ int main(
 		sprintf(
 			t_query[0],
 			"UPDATE ct_log"
-				" SET LATEST_UPDATE=statement_timestamp(),"
+				" SET LATEST_UPDATE=statement_timestamp() AT TIME ZONE 'UTC',"
 					" TREE_SIZE=%" LENGTH64 "d,"
 					" LATEST_STH_TIMESTAMP=(TIMESTAMP WITH TIME ZONE 'epoch'"
 						" + interval'%" LENGTH64 "d seconds'"
@@ -470,7 +470,7 @@ int main(
 			sprintf(
 				t_query[0],
 				"UPDATE ct_log"
-					" SET LATEST_UPDATE=statement_timestamp()"
+					" SET LATEST_UPDATE=statement_timestamp() AT TIME ZONE 'UTC'"
 					" WHERE ID=%s",
 				PQgetvalue(t_PGresult_select, i, 0)
 			);
