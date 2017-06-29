@@ -223,6 +223,7 @@ int main(
 	json_object* j_extraData = NULL;
 	array_list* t_entriesArr = NULL;
 	uint32_t t_entryID;
+	uint32_t t_batchSize;
 	uint32_t t_confirmedEntryID = -1;
 	uint64_t t_timestamp;
 	int64_t t_sthTimestamp;
@@ -278,7 +279,7 @@ int main(
 	/* Get the latest CT Entry ID that we've added to the DB already */
 	sprintf(
 		t_query[0],
-		"SELECT ctl.ID, ctl.URL, ctl.LATEST_ENTRY_ID, ctl.NAME"
+		"SELECT ctl.ID, ctl.URL, ctl.LATEST_ENTRY_ID, ctl.NAME, coalesce(ctl.BATCH_SIZE, 256)"
 			" FROM ct_log ctl"
 			" WHERE ctl.IS_ACTIVE"
 	);
@@ -386,6 +387,11 @@ int main(
 			);
 		printf("Highest Entry ID stored: %d\n", t_entryID);
 
+		t_batchSize = strtoul(
+			PQgetvalue(t_PGresult_select, i, 4), NULL, 10
+		);
+		printf("Batch size (end - start): %u\n", t_batchSize);
+
 		j_getSTH = json_tokener_parse(t_responseBuffer.data);
 		if (!json_object_object_get_ex(j_getSTH, "tree_size", &j_treeSize))
 			goto label_exit;
@@ -436,8 +442,8 @@ int main(
 			sprintf(
 				t_temp, "%s/ct/v1/get-entries?start=%d&end=%" LENGTH64 "d",
 				PQgetvalue(t_PGresult_select, i, 1), t_entryID,
-				(t_treeSize > (t_entryID + 255)) ?
-					(t_entryID + 255) : (t_treeSize - 1)
+				(t_treeSize > (t_entryID + t_batchSize - 1)) ?
+					(t_entryID + t_batchSize - 1) : (t_treeSize - 1)
 			);
 			printError(t_temp, NULL);
 
