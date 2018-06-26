@@ -413,7 +413,7 @@ int main(
 
 		/* TODO: Verify the STH signature */
 
-		/* Update "Latest STH", "Latest Entry #" and "Last Contacted" */
+		/* Update "Last Contacted" and "Latest STH" timestamps, and the "Tree Size" */
 		sprintf(
 			t_query[0],
 			"UPDATE ct_log"
@@ -472,12 +472,14 @@ int main(
 				goto label_exit;
 			}
 
-			/* Update the "Last Contacted" timestamp */
+			/* Update the "Last Contacted" timestamp and the "Latest Entry ID" */
 			sprintf(
 				t_query[0],
 				"UPDATE ct_log"
-					" SET LATEST_UPDATE=statement_timestamp() AT TIME ZONE 'UTC'"
+					" SET LATEST_UPDATE=statement_timestamp() AT TIME ZONE 'UTC',"
+						" LATEST_ENTRY_ID=%" LENGTH32 "d"
 					" WHERE ID=%s",
+				t_entryID - 1,
 				PQgetvalue(t_PGresult_select, i, 0)
 			);
 			t_PGresult = PQexec(t_PGconn, t_query[0]);
@@ -782,6 +784,28 @@ int main(
 	t_returnCode = EXIT_SUCCESS;
 
 label_exit:
+	if (t_confirmedEntryID != -1) {
+		/* Update the "Last Contacted" timestamp and the "Latest Entry ID" */
+		sprintf(
+			t_query[0],
+			"UPDATE ct_log"
+				" SET LATEST_UPDATE=statement_timestamp() AT TIME ZONE 'UTC',"
+					" LATEST_ENTRY_ID=%" LENGTH32 "d"
+				" WHERE ID=%s",
+			t_confirmedEntryID,
+			PQgetvalue(t_PGresult_select, i, 0)
+		);
+		t_PGresult = PQexec(t_PGconn, t_query[0]);
+		if (PQresultStatus(t_PGresult) != PGRES_COMMAND_OK) {
+			/* The SQL query failed */
+			printError(
+				"UPDATE Query failed",
+				PQerrorMessage(t_PGconn)
+			);
+		}
+		PQclear(t_PGresult);
+	}
+
 	printError("Terminated", NULL);
 
 	/* Clear the query results */
