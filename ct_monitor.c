@@ -493,10 +493,8 @@ int main(
 			sprintf(
 				t_query[0],
 				"UPDATE ct_log"
-					" SET LATEST_UPDATE=statement_timestamp() AT TIME ZONE 'UTC',"
-						" LATEST_ENTRY_ID=%" LENGTH32 "d"
+					" SET LATEST_UPDATE=statement_timestamp() AT TIME ZONE 'UTC'"
 					" WHERE ID=%s",
-				t_entryID - 1,
 				PQgetvalue(t_PGresult_select, i, 0)
 			);
 			t_PGresult = PQexec(t_PGconn, t_query[0]);
