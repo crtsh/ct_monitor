@@ -279,7 +279,7 @@ int main(
 	/* Get the latest CT Entry ID that we've added to the DB already */
 	sprintf(
 		t_query[0],
-		"SELECT ctl.ID, ctl.URL, ctl.LATEST_ENTRY_ID, ctl.NAME, coalesce(ctl.BATCH_SIZE, 256)"
+		"SELECT ctl.ID, ctl.URL, ctl.NAME, coalesce(ctl.BATCH_SIZE, 256)"
 			" FROM ct_log ctl"
 			" WHERE ctl.IS_ACTIVE"
 	);
@@ -344,7 +344,7 @@ int main(
 		/* CURLOPT_URL: The URL to deal with */
 		sprintf(t_temp, "%s/ct/v1/get-sth",
 			PQgetvalue(t_PGresult_select, i, 1));
-		printError(t_temp, PQgetvalue(t_PGresult_select, i, 3));
+		printError(t_temp, PQgetvalue(t_PGresult_select, i, 2));
 		CURL_EASY_SETOPT(CURLOPT_URL, t_temp)
 
 		/* SETUP CURL HTTP OPTIONS */
@@ -379,16 +379,33 @@ int main(
 			goto label_exit;
 		}
 
-		if (PQgetisnull(t_PGresult_select, i, 2))
+		/* Get the latest CT Entry ID we've previously obtained for this log */
+		sprintf(
+			t_query[0],
+			"SELECT max(ctle.ENTRY_ID)"
+				" FROM ct_log_entry ctle"
+				" WHERE ctle.CT_LOG_ID = %s",
+			PQgetvalue(t_PGresult_select, i, 0)
+		);
+		PGresult* t_PGresult_maxEntryID = PQexec(
+			t_PGconn, t_query[0]
+		);
+		if (PQresultStatus(t_PGresult_maxEntryID) != PGRES_TUPLES_OK) {
+			/* The SQL query failed */
+			printError("Query failed", PQerrorMessage(t_PGconn));
+			goto label_exit;
+		}
+		if (PQgetisnull(t_PGresult_maxEntryID, i, 0))
 			t_entryID = -1;
 		else
 			t_entryID = strtoul(
-				PQgetvalue(t_PGresult_select, i, 2), NULL, 10
+				PQgetvalue(t_PGresult_maxEntryID, i, 0), NULL, 10
 			);
+		PQclear(t_PGresult_maxEntryID);
 		printf("Highest Entry ID stored: %d\n", t_entryID);
 
 		t_batchSize = strtoul(
-			PQgetvalue(t_PGresult_select, i, 4), NULL, 10
+			PQgetvalue(t_PGresult_select, i, 3), NULL, 10
 		);
 		printf("Batch size (end - start): %u\n", t_batchSize);
 
@@ -784,28 +801,6 @@ int main(
 	t_returnCode = EXIT_SUCCESS;
 
 label_exit:
-	if (t_confirmedEntryID != -1) {
-		/* Update the "Last Contacted" timestamp and the "Latest Entry ID" */
-		sprintf(
-			t_query[0],
-			"UPDATE ct_log"
-				" SET LATEST_UPDATE=statement_timestamp() AT TIME ZONE 'UTC',"
-					" LATEST_ENTRY_ID=%" LENGTH32 "d"
-				" WHERE ID=%s",
-			t_confirmedEntryID,
-			PQgetvalue(t_PGresult_select, i, 0)
-		);
-		t_PGresult = PQexec(t_PGconn, t_query[0]);
-		if (PQresultStatus(t_PGresult) != PGRES_COMMAND_OK) {
-			/* The SQL query failed */
-			printError(
-				"UPDATE Query failed",
-				PQerrorMessage(t_PGconn)
-			);
-		}
-		PQclear(t_PGresult);
-	}
-
 	printError("Terminated", NULL);
 
 	/* Clear the query results */
