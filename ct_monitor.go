@@ -328,8 +328,8 @@ func (w *Work) sthMonitor() {
 	}
 }
 
-func (w *Work) logNewEntryWriter(status string, outcome string) {
-	log.Printf("%v,,\"[newEntryWriter]\",\"%s\",\"%s\"\n", time.Now().UTC(), status, outcome)
+func (w *Work) logNewEntryWriter(status string, outcome string, start_time time.Time) {
+	log.Printf("%v,%v,\"[newEntryWriter]\",\"%s\",\"%s\"\n", time.Now().UTC(), time.Now().Sub(start_time), status, outcome)
 }
 
 func (w *Work) newEntryWriter() {
@@ -341,6 +341,8 @@ func (w *Work) newEntryWriter() {
 	sha256_issuer_cache := make(map[[sha256.Size]byte]sql.NullInt64)
 	var err error
 	var start_time time.Time
+	var len_certs_to_copy int
+	var len_queue int
 
 	for keep_looping {
 		var tx *sql.Tx
@@ -397,7 +399,8 @@ func (w *Work) newEntryWriter() {
 		continue
 
 	copy_certs:
-		w.logNewEntryWriter("INFO", fmt.Sprintf("COPYing %d of %d queued certs", len(certs_to_copy), len(w.chan_newEntries) + len(certs_to_copy)))
+		len_certs_to_copy = len(certs_to_copy)
+		len_queue = len(w.chan_newEntries) + len(certs_to_copy)
 		start_time = time.Now().UTC()
 
 		// Start a transaction.
@@ -447,11 +450,11 @@ func (w *Work) newEntryWriter() {
 		// Commit the transaction.  This will drop the temporary table.
 		err = tx.Commit()
 
-		w.logNewEntryWriter("INFO", fmt.Sprintf("COPY/Processing took %v", time.Now().Sub(start_time)))
+		w.logNewEntryWriter("INFO", fmt.Sprintf("Processed %d (of %d)", len_certs_to_copy, len_queue), start_time)
 
 	next:
 		if err != nil {
-			w.logNewEntryWriter("ERROR", err.Error())
+			w.logNewEntryWriter("ERROR", err.Error(), start_time)
 			// TODO: Avoid hanging when an error occurs.
 		}
 
@@ -472,13 +475,11 @@ func (w *Work) newEntryWriter() {
 // Per-batch initialization.
 func (w *Work) Begin(db *sql.DB) {
 	w.db = db
-	log.Printf("%v,,\"[Main]\",\"BATCH\",\"Started\"\n", time.Now().UTC())
 }
 
 // Work.End
 // Per-batch post-processing.
 func (w *Work) End() {
-	log.Printf("%v,,\"[Main]\",\"BATCH\",\"Ended\"\n", time.Now().UTC())
 }
 
 // Work.Exit
