@@ -133,7 +133,7 @@ CREATE TEMP TABLE newentries_temp (
 	CERTIFICATE_ID bigint,
 	ISSUER_CA_ID integer,
 	SUBJECT_CA_ID integer,
-	LINTING_APPLIES bool,
+	LINTING_APPLIES bool			DEFAULT 'f',
 	NEW_CERT_COUNT integer			DEFAULT 1,
 	NEW_AND_CAN_ISSUE_CERTS bool	DEFAULT 'f',
 	IS_NEW_CA bool					DEFAULT 'f'
