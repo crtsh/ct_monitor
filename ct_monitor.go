@@ -100,11 +100,13 @@ func (w *Work) Init(c *config) {
 
 	var err error
 
-	w.get_log_list_statement, err = w.db.Prepare(`
+	w.get_log_list_statement, err = w.db.Prepare(fmt.Sprintf(`
 SELECT ctl.ID, ctl.URL, ctl.TREE_SIZE, coalesce(ctl.LATEST_STH_TIMESTAMP, 'epoch'::date)
 	FROM ct_log ctl
 	WHERE ctl.IS_ACTIVE
-`)
+	ORDER BY ctl.LATEST_UPDATE
+	LIMIT %d
+`, w.c.Batch))
 	checkErr(err)
 
 	w.create_getsth_temp_table_statement, err = w.db.Prepare(`
@@ -150,18 +152,14 @@ CREATE TEMP TABLE newentries_temp (
 	// Spin up a goroutine that will regularly poll each log's /ct/v1/get-sth API, then verify each STH's signature and update ct_log{TREE_SIZE, LATEST_STH_TIMESTAMP, LATEST_UPDATE}.
 	w.wg_closeWorkers.Add(1)
 	go func() {
-		defer func() {
-			w.wg_closeWorkers.Done()
-		}()
+		defer w.wg_closeWorkers.Done()
 		w.sthMonitor()
 	}()
 
 	// Spin up the newEntryWriter goroutine, which will consume from the chan_newEntries channel and regularly bulk-import new log entries.
 	w.wg_closeWorkers.Add(1)
 	go func() {
-		defer func() {
-			w.wg_closeWorkers.Done()
-		}()
+		defer w.wg_closeWorkers.Done()
 		w.newEntryWriter()
 	}()
 
@@ -233,8 +231,8 @@ func (w *Work) sthMonitor() {
 		var tx_create_getsth_temp_table_statement *sql.Stmt
 		var tx_getsth_update_statement *sql.Stmt
 		var tx_copy_item_statement *sql.Stmt
-		i := 0
-		chan_getSTH := make(chan CTLogDetails)
+		var wg_getSTH sync.WaitGroup
+		chan_getSTH := make(chan CTLogDetails, w.c.Batch)
 
 		// List all of the logs that we're currently monitoring.
 		rows, err := w.get_log_list_statement.Query()
@@ -251,17 +249,18 @@ func (w *Work) sthMonitor() {
 			if err != nil {
 				w.logSthMonitor("ERROR", err.Error())
 			} else {
-				i++
+				// Launch a goroutine to GET /ct/v1/get-sth for this log.
+				wg_getSTH.Add(1)
+				go func() {
+					defer wg_getSTH.Done()
+					if !w.getSth(&ctld) {
+						ctld.id = -1
+					}
+					chan_getSTH <- ctld
+				}()
 			}
-
-			// Launch a goroutine to GET /ct/v1/get-sth for this log.
-			go func() {
-				if !w.getSth(&ctld) {
-					ctld.id = -1
-				}
-				chan_getSTH <- ctld
-			}()
 		}
+		wg_getSTH.Wait()
 
 		// Start a transaction.
 		tx, err = w.db.Begin()
@@ -289,8 +288,8 @@ func (w *Work) sthMonitor() {
 		}
 
 		// Add rows to the COPY statement.
-		for ; i > 0; i-- {
-			ctld := <-chan_getSTH
+		close(chan_getSTH)
+		for ctld := range chan_getSTH {
 			if ctld.id != -1 {
 				_, err = tx_copy_item_statement.Exec(ctld.id, ctld.tree_size, ctld.latest_sth_timestamp, ctld.latest_update)
 				if err != nil {
