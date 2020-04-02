@@ -136,7 +136,7 @@ CREATE TEMP TABLE newentries_temp (
 	ISSUER_CA_ID integer,
 	SUBJECT_CA_ID integer,
 	LINTING_APPLIES bool			DEFAULT 'f',
-	NEW_CERT_COUNT integer			DEFAULT 1,
+	NUM_ISSUED_INDEX smallint,
 	NEW_AND_CAN_ISSUE_CERTS bool	DEFAULT 'f',
 	IS_NEW_CA bool					DEFAULT 'f'
 ) ON COMMIT DROP
@@ -327,8 +327,9 @@ func (w *Work) sthMonitor() {
 	}
 }
 
-func (w *Work) logNewEntryWriter(status string, outcome string, start_time time.Time) {
-	log.Printf("%v,%v,\"[newEntryWriter]\",\"%s\",\"%s\"\n", time.Now().UTC(), time.Now().Sub(start_time), status, outcome)
+func (w *Work) logNewEntryWriter(status string, outcome string, last_end_time time.Time, start_time time.Time, copy_finished_time time.Time, processing_finished_time time.Time, commit_finished_time time.Time) {
+	t_now := time.Now().UTC()
+	log.Printf("%v,%v,%v,%v,%v,%v,\"[newEntryWriter]\",\"%s\",\"%s\"\n", t_now, start_time.Sub(last_end_time), copy_finished_time.Sub(start_time), processing_finished_time.Sub(copy_finished_time), commit_finished_time.Sub(processing_finished_time), t_now.Sub(commit_finished_time), status, outcome)
 }
 
 func (w *Work) newEntryWriter() {
@@ -339,7 +340,11 @@ func (w *Work) newEntryWriter() {
 	var certs_to_copy []NewLogEntry
 	sha256_issuer_cache := make(map[[sha256.Size]byte]sql.NullInt64)
 	var err error
+	last_end_time := time.Now().UTC()
 	var start_time time.Time
+	var copy_finished_time time.Time
+	var processing_finished_time time.Time
+	var commit_finished_time time.Time
 	var len_certs_to_copy int
 	var len_queue int
 
@@ -420,7 +425,7 @@ func (w *Work) newEntryWriter() {
 		}
 
 		// Prepare the COPY statement.
-		if tx_copy_item_statement, err = tx.Prepare(pq.CopyIn("newentries_temp", "ct_log_id", "entry_id", "entry_timestamp", "der_x509", "sha256_x509", "issuer_ca_id")); err != nil {
+		if tx_copy_item_statement, err = tx.Prepare(pq.CopyIn("newentries_temp", "ct_log_id", "entry_id", "entry_timestamp", "der_x509", "sha256_x509", "issuer_ca_id", "num_issued_index")); err != nil {
 			goto next
 		}
 
@@ -431,7 +436,15 @@ func (w *Work) newEntryWriter() {
 				issuer_ca_id = sha256_issuer_cache[entry.sha256_issuer]
 			}
 
-			if _, err = tx_copy_item_statement.Exec(entry.ct_log_id, entry.entry_id, entry.entry_timestamp, entry.cert.Raw, entry.sha256_cert[:], issuer_ca_id); err != nil {
+			num_issued_index := 1		// Certificate.
+			for _, ext := range entry.cert.Extensions {
+				if x509.OIDExtensionCTPoison.Equal(ext.Id) && ext.Critical {
+					num_issued_index = 2	// Precertificate
+					break
+				}
+			}
+
+			if _, err = tx_copy_item_statement.Exec(entry.ct_log_id, entry.entry_id, entry.entry_timestamp, entry.cert.Raw, entry.sha256_cert[:], issuer_ca_id, num_issued_index); err != nil {
 				goto next
 			}
 		}
@@ -440,25 +453,28 @@ func (w *Work) newEntryWriter() {
 		if _, err = tx_copy_item_statement.Exec(); err != nil {
 			goto next
 		}
-
+		copy_finished_time = time.Now().UTC()
 		// Process the COPYed data.
 		if _, err = tx_newentries_update_statement.Exec(); err != nil {
 			goto next
 		}
+		processing_finished_time = time.Now().UTC()
 
 		// Commit the transaction.  This will drop the temporary table.
 		err = tx.Commit()
+		commit_finished_time = time.Now().UTC()
 
-		w.logNewEntryWriter("INFO", fmt.Sprintf("Processed %d (of %d)", len_certs_to_copy, len_queue), start_time)
+		w.logNewEntryWriter("INFO", fmt.Sprintf("Processed %d (of %d)", len_certs_to_copy, len_queue), last_end_time, start_time, copy_finished_time, processing_finished_time, commit_finished_time)
 
 	next:
 		if err != nil {
-			w.logNewEntryWriter("ERROR", err.Error(), start_time)
+			w.logNewEntryWriter("ERROR", err.Error(), last_end_time, start_time, copy_finished_time, processing_finished_time, commit_finished_time)
 			// TODO: Avoid hanging when an error occurs.
 		}
 
 		// Empty the queue, now that we've processed it.
 		certs_to_copy = nil
+		last_end_time = time.Now().UTC()
 
 	ack:
 		for acks_to_send > 0 {
