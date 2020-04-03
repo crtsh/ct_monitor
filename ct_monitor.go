@@ -601,7 +601,11 @@ func (wi *WorkItem) Perform(db *sql.DB, w *Work) {
 			// Construct log entry structure.
 			log_entry, err := ct.LogEntryFromLeaf(start, &entry)
 			if x509.IsFatal(err) {
-				wi.logErr(get_entries_url, "ERROR", fmt.Sprintf("Entry #%d: %v", start, err))
+				raw_log_entry, err2 := ct.RawLogEntryFromLeaf(start, &entry)
+				if err2 != nil {
+					wi.logErr(get_entries_url, "ERROR", fmt.Sprintf("Entry #%d; Timestamp=%v; %v", start, err2, err))
+				}
+				wi.logErr(get_entries_url, "ERROR", fmt.Sprintf("Entry #%d; Timestamp=%v; %v", start, ct.TimestampToTime(raw_log_entry.Leaf.TimestampedEntry.Timestamp).UTC(), err))
 				return
 			}
 			new_log_entry := NewLogEntry{
