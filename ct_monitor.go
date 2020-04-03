@@ -43,10 +43,11 @@ type NewLogEntry struct {
 	ct_log_id int
 	entry_id int64
 	entry_timestamp time.Time
-	cert *x509.Certificate
+	der_cert []byte
 	sha256_cert [sha256.Size]byte
 	sha256_issuer [sha256.Size]byte
 	issuer_verified bool
+	is_precertificate bool
 }
 
 type Work struct {
@@ -380,7 +381,7 @@ func (w *Work) newEntryWriter() {
 					// Let's see if we've already cached this CA certificate's crt.sh CA ID.
 					ca_id := sha256_issuer_cache[new_log_entry.sha256_cert]
 					if !ca_id.Valid {		// It's not already cached, so import and cache it now.
-						if err = w.import_chain_cert_statement.QueryRow(new_log_entry.cert.Raw, issuer_ca_id).Scan(&ca_id); err == nil {
+						if err = w.import_chain_cert_statement.QueryRow(new_log_entry.der_cert, issuer_ca_id).Scan(&ca_id); err == nil {
 							sha256_issuer_cache[new_log_entry.sha256_cert] = ca_id
 						}
 					}
@@ -437,14 +438,11 @@ func (w *Work) newEntryWriter() {
 			}
 
 			num_issued_index := 1		// Certificate.
-			for _, ext := range entry.cert.Extensions {
-				if x509.OIDExtensionCTPoison.Equal(ext.Id) && ext.Critical {
-					num_issued_index = 2	// Precertificate
-					break
-				}
+			if entry.is_precertificate {
+				num_issued_index = 2	// Precertificate.
 			}
 
-			if _, err = tx_copy_item_statement.Exec(entry.ct_log_id, entry.entry_id, entry.entry_timestamp, entry.cert.Raw, entry.sha256_cert[:], issuer_ca_id, num_issued_index); err != nil {
+			if _, err = tx_copy_item_statement.Exec(entry.ct_log_id, entry.entry_id, entry.entry_timestamp, entry.der_cert, entry.sha256_cert[:], issuer_ca_id, num_issued_index); err != nil {
 				goto next
 			}
 		}
@@ -540,6 +538,20 @@ func (wi *WorkItem) Parse(rs *sql.Rows) error {
 	return rs.Scan(&wi.ct_log_id, &wi.ct_log_url, &wi.tree_size, &wi.batch_size, &wi.chunk_size, &wi.start_entry_id)
 }
 
+func is_precertificate(cert *x509.Certificate, entry_type ct.LogEntryType) bool {
+	if cert != nil {
+		for _, ext := range cert.Extensions {
+			if x509.OIDExtensionCTPoison.Equal(ext.Id) && ext.Critical {
+				return true		// Precertificate.
+			}
+		}
+	} else if (entry_type == ct.PrecertLogEntryType) {
+		return true				// Precertificate.  (We can't parse it, so we have to assume that the log entry type is correct.
+	}
+
+	return false
+}
+
 // WorkItem.Perform()
 // Do the work for one item.
 func (wi *WorkItem) Perform(db *sql.DB, w *Work) {
@@ -599,13 +611,9 @@ func (wi *WorkItem) Perform(db *sql.DB, w *Work) {
 		// Loop through the entries.
 		for _, entry := range get_entries.Entries {
 			// Construct log entry structure.
-			log_entry, err := ct.LogEntryFromLeaf(start, &entry)
-			if x509.IsFatal(err) {
-				raw_log_entry, err2 := ct.RawLogEntryFromLeaf(start, &entry)
-				if err2 != nil {
-					wi.logErr(get_entries_url, "ERROR", fmt.Sprintf("Entry #%d; Timestamp=%v; %v", start, err2, err))
-				}
-				wi.logErr(get_entries_url, "ERROR", fmt.Sprintf("Entry #%d; Timestamp=%v; %v", start, ct.TimestampToTime(raw_log_entry.Leaf.TimestampedEntry.Timestamp).UTC(), err))
+			raw_log_entry, err := ct.RawLogEntryFromLeaf(start, &entry)
+			if err != nil {
+				wi.logErr(get_entries_url, "ERROR", fmt.Sprintf("Entry #%d; %v", start, err))
 				return
 			}
 			new_log_entry := NewLogEntry{
@@ -613,49 +621,56 @@ func (wi *WorkItem) Perform(db *sql.DB, w *Work) {
 			}
 
 			var issuer_cert *x509.Certificate
-			for i := len(log_entry.Chain) - 1; i >= 0; i-- {
+			var cert *x509.Certificate
+			for i := len(raw_log_entry.Chain) - 1; i >= 0; i-- {
 				new_log_entry.issuer_verified = false
-				new_log_entry.cert, err = x509.ParseCertificate(log_entry.Chain[i].Data)
+				new_log_entry.der_cert = raw_log_entry.Chain[i].Data
+				cert, err = x509.ParseCertificate(new_log_entry.der_cert)
 				if err != nil {
-					wi.logErr(get_entries_url, "ERROR", fmt.Sprintf("Entry #%d: %v", log_entry.Index, err))
+					wi.logErr(get_entries_url, "WARNING", fmt.Sprintf("Entry #%d: Timestamp=%v; %v", raw_log_entry.Index, ct.TimestampToTime(raw_log_entry.Leaf.TimestampedEntry.Timestamp).UTC(), err))
+					cert = nil
 				} else if issuer_cert != nil {
-					if new_log_entry.cert.CheckSignatureFrom(issuer_cert) == nil {
+					if cert.CheckSignatureFrom(issuer_cert) == nil {
 						// Signature is valid, so pass the parent certificate's SHA-256 hash.
 						new_log_entry.sha256_issuer = sha256.Sum256(issuer_cert.Raw)
 						new_log_entry.issuer_verified = true
 					}
 				}
 
-				new_log_entry.sha256_cert = sha256.Sum256(new_log_entry.cert.Raw)
+				new_log_entry.sha256_cert = sha256.Sum256(new_log_entry.der_cert)
+				new_log_entry.is_precertificate = is_precertificate(cert, ct.X509LogEntryType)
 
 				// Send this CA certificate to the newEntryWriter.
 				w.chan_newEntries <- new_log_entry
 
-				issuer_cert = new_log_entry.cert
+				issuer_cert = cert
 			}
 
 			// Process the certificate or precertificate entry.
 			new_log_entry.ct_log_id = wi.ct_log_id
 			new_log_entry.issuer_verified = false
-			new_log_entry.entry_id = log_entry.Index
-			new_log_entry.entry_timestamp = ct.TimestampToTime(log_entry.Leaf.TimestampedEntry.Timestamp).UTC()
-			if log_entry.X509Cert != nil {
-				new_log_entry.cert = log_entry.X509Cert
-			} else if log_entry.Precert != nil {
-				new_log_entry.cert, err = x509.ParseCertificate(log_entry.Precert.Submitted.Data)
-				if err != nil {
-					wi.logErr(get_entries_url, "WARNING", fmt.Sprintf("Entry #%d: x509.ParseCertificate(precertificate) => %v", log_entry.Index, err))
-				}
-			} else {
-				wi.logErr(get_entries_url, "ERROR", fmt.Sprintf("Entry #%d: Unsupported entry type", log_entry.Index))
-				return
+			new_log_entry.entry_id = raw_log_entry.Index
+			new_log_entry.entry_timestamp = ct.TimestampToTime(raw_log_entry.Leaf.TimestampedEntry.Timestamp).UTC()
+			switch entry_type := raw_log_entry.Leaf.TimestampedEntry.EntryType; entry_type {
+				case ct.X509LogEntryType: new_log_entry.der_cert = raw_log_entry.Leaf.TimestampedEntry.X509Entry.Data
+				case ct.PrecertLogEntryType: new_log_entry.der_cert = raw_log_entry.Cert.Data
+				default:
+					wi.logErr(get_entries_url, "ERROR", fmt.Sprintf("Entry #%d: Unknown entry type: %v", raw_log_entry.Index, entry_type))
+					return
 			}
 
-			new_log_entry.sha256_cert = sha256.Sum256(new_log_entry.cert.Raw)
+			cert, err = x509.ParseCertificate(new_log_entry.der_cert)
+			if err != nil {
+				wi.logErr(get_entries_url, "WARNING", fmt.Sprintf("Entry #%d: Timestamp=%v; %v", raw_log_entry.Index, new_log_entry.entry_timestamp, err))
+				cert = nil
+			}
+
+			new_log_entry.sha256_cert = sha256.Sum256(new_log_entry.der_cert)
+			new_log_entry.is_precertificate = is_precertificate(cert, raw_log_entry.Leaf.TimestampedEntry.EntryType)
 
 			// Verify the certificate or precertificate's signature, if possible.
-			if (new_log_entry.cert != nil) && (issuer_cert != nil) {
-				if new_log_entry.cert.CheckSignatureFrom(issuer_cert) == nil {
+			if (cert != nil) && (issuer_cert != nil) {
+				if cert.CheckSignatureFrom(issuer_cert) == nil {
 					// Signature is valid, so pass the parent certificate's SHA-256 hash.
 					new_log_entry.sha256_issuer = sha256.Sum256(issuer_cert.Raw)
 					new_log_entry.issuer_verified = true
