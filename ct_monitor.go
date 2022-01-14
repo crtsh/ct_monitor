@@ -202,6 +202,7 @@ func (w *Work) getSth(ctld *CTLogDetails) bool {
 		w.logErr(ctld, "FAILED", fmt.Sprintf("http.NewRequest => %v", err))
 		return false
 	}
+	http_req.Header.Set("User-Agent", "github.com/crtsh/ct_monitor")
 	http_resp, err := w.http_client.Do(http_req)
 	if err != nil {
 		w.logErr(ctld, "FAILED", fmt.Sprintf("http_client.Do => %v", err))
@@ -238,7 +239,7 @@ func (w *Work) getSth(ctld *CTLogDetails) bool {
 	ctld.latest_update = time.Now().UTC()
 
 	// TODO: Verify STH signature.
-    // TODO: Take some action if the STH signature is invalid.
+	// TODO: Take some action if the STH signature is invalid.
 
 	return true
 }
@@ -600,6 +601,7 @@ func (wi *WorkItem) Perform(db *sql.DB, w *Work) {
 			wi.logErr(get_entries_url, "FAILED", fmt.Sprintf("http.NewRequest => %v", err))
 			return
 		}
+		http_req.Header.Set("User-Agent", "github.com/crtsh/ct_monitor")
 		http_resp, err := w.http_client.Do(http_req)
 		if err != nil {
 			wi.logErr(get_entries_url, "FAILED", fmt.Sprintf("http_client.Do => %v", err))
