@@ -1,0 +1,10 @@
+certwatchdb:
+  host: localhost
+  password: certwatch
+ctlogs:
+  getSTHFrequency: 10s
+  httpTimeout: 30s
+server:
+  monitoringPort: 8081
+logging:
+  isDevelopment: false
