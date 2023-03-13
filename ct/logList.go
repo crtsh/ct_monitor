@@ -56,6 +56,9 @@ func UpdateLogList(newctlog map[int]*Log) {
 		} else {
 			ctlog[i].Url = newctl.Url // A log's URL could conceivably be updated but still refer to the exact same log.
 			ctlog[i].isActive = true  // A log could conceivably be removed then added again on the DB before being removed from the log map.
+			ctlog[i].TreeSize = newctl.TreeSize
+			ctlog[i].LatestSTHTimestamp = newctl.LatestSTHTimestamp
+			ctlog[i].LatestUpdate = newctl.LatestUpdate
 		}
 	}
 

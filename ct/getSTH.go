@@ -83,22 +83,28 @@ func getSTH(i int) Log {
 				logger.Logger.Error(fmt.Sprintf("HTTP %d", httpResponse.StatusCode), zap.Error(err))
 			} else if err = json.Unmarshal(body, &getSTH); err != nil {
 				logger.Logger.Error("json.Unmarshal failed", zap.Error(err))
-			} else if thisSTHTimestamp := time.Unix(0, int64(getSTH.Timestamp)*int64(time.Millisecond)).UTC(); thisSTHTimestamp.After(latestSTHTimestamp) {
-				logger.Logger.Info(
-					"New STH",
-					zap.String("logURL", logURL),
-					zap.Time("sthTimestamp", thisSTHTimestamp),
-					zap.Uint64("treeSize", getSTH.TreeSize),
-				)
+			} else {
+				// Report if this STH is newer than the previous STH we observed.
+				var thisSTHTimestamp time.Time
+				if thisSTHTimestamp = time.Unix(0, int64(getSTH.Timestamp)*int64(time.Millisecond)).UTC(); thisSTHTimestamp.After(latestSTHTimestamp) {
+					logger.Logger.Info(
+						"New STH",
+						zap.String("logURL", logURL),
+						zap.Time("sthTimestamp", thisSTHTimestamp),
+						zap.Uint64("treeSize", getSTH.TreeSize),
+					)
+				}
 				// Copy the updated get-sth details.
 				syncMutex.Lock()
 				updatedLog := ctlog[i]
 				if updatedLog == nil {
 					panic(fmt.Errorf("ctlog[%d] unexpectedly nil", i))
 				}
-				updatedLog.TreeSize = int64(getSTH.TreeSize)
-				updatedLog.LatestSTHTimestamp = thisSTHTimestamp
-				updatedLog.LatestUpdate = time.Now().UTC()
+				if thisSTHTimestamp.After(updatedLog.LatestSTHTimestamp) { // Only update these fields if this STH is newer than the latest STH we've previously observed.
+					updatedLog.TreeSize = int64(getSTH.TreeSize)
+					updatedLog.LatestSTHTimestamp = thisSTHTimestamp
+				}
+				updatedLog.LatestUpdate = time.Now().UTC() // We update this field every time we successfully complete a get-sth call.
 				ctlog[i] = updatedLog
 				syncMutex.Unlock()
 
