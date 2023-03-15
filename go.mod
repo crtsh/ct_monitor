@@ -8,7 +8,7 @@ require (
 	github.com/jackc/pgx/v5 v5.3.1
 	github.com/prometheus/client_golang v1.14.0
 	github.com/spf13/viper v1.15.0
-	github.com/valyala/fasthttp v1.44.0
+	github.com/valyala/fasthttp v1.45.0
 	go.uber.org/zap v1.24.0
 )
 
