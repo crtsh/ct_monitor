@@ -14,7 +14,6 @@ import (
 	ctgo "github.com/google/certificate-transparency-go"
 
 	"go.uber.org/zap"
-
 )
 
 var httpClient http.Client
@@ -94,6 +93,14 @@ func getSTH(i int) Log {
 						zap.Uint64("treeSize", getSTH.TreeSize),
 					)
 				}
+
+				var sth *ctgo.SignedTreeHead
+				if sth, err = getSTH.ToSignedTreeHead(); err != nil {
+					logger.Logger.Error(
+						"ToSignedTreeHead failed",
+					)
+				}
+
 				// Copy the updated get-sth details.
 				syncMutex.Lock()
 				updatedLog := ctlog[i]
@@ -105,10 +112,25 @@ func getSTH(i int) Log {
 					updatedLog.LatestSTHTimestamp = thisSTHTimestamp
 				}
 				updatedLog.LatestUpdate = time.Now().UTC() // We update this field every time we successfully complete a get-sth call.
+				// Verify STH signature.
+				if err = updatedLog.SigVer.VerifySTHSignature(*sth); err != nil {
+					logger.Logger.Error(
+						"Invalid STH Signature",
+						zap.String("logURL", logURL),
+						zap.Time("sthTimestamp", thisSTHTimestamp),
+						zap.Uint64("treeSize", getSTH.TreeSize),
+					)
+				} else if time.Since(thisSTHTimestamp) > (time.Duration(updatedLog.MMDInSeconds) * time.Second) {
+					logger.Logger.Error(
+						"STH Timestamp older than MMD",
+						zap.String("logURL", logURL),
+						zap.Time("sthTimestamp", thisSTHTimestamp),
+						zap.Uint64("treeSize", getSTH.TreeSize),
+					)
+				}
 				ctlog[i] = updatedLog
 				syncMutex.Unlock()
 
-				// TODO: Verify STH signature.
 				// TODO: If the STH signature is invalid, or its timestamp has exceeded the log's MMD, record this in a logging table.
 
 				return *updatedLog

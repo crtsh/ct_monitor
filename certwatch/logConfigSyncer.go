@@ -33,7 +33,7 @@ func LogConfigSyncer(ctx context.Context) {
 func syncLogConfig() time.Duration {
 	// Query existing CT log configuration on the certwatch DB.
 	if rows, err := connLogConfigSyncer.Query(context.Background(), `
-SELECT ctl.ID, ctl.PUBLIC_KEY, ctl.URL, coalesce(ctl.BATCH_SIZE, 32), coalesce(ctl.REQUESTS_PER_MINUTE, 64 * 60), coalesce(ctl.REQUESTS_CONCURRENT, 4), coalesce(latest.ENTRY_ID, -1)
+SELECT ctl.ID, ctl.PUBLIC_KEY, ctl.URL, ctl.MMD_IN_SECONDS, coalesce(ctl.BATCH_SIZE, 32), coalesce(ctl.REQUESTS_PER_MINUTE, 64 * 60), coalesce(ctl.REQUESTS_CONCURRENT, 4), coalesce(latest.ENTRY_ID, -1)
 	FROM ct_log ctl
 			LEFT JOIN LATERAL (
 				SELECT max(ctle.ENTRY_ID) ENTRY_ID
@@ -53,7 +53,7 @@ SELECT ctl.ID, ctl.PUBLIC_KEY, ctl.URL, coalesce(ctl.BATCH_SIZE, 32), coalesce(c
 		newctlog := make(map[int]*ct.Log)
 		for rows.Next() {
 			var ctl ct.Log
-			if err = rows.Scan(&ctl.Id, &ctl.PublicKey, &ctl.Url, &ctl.BatchSize, &ctl.RequestsPerMinute, &ctl.RequestsConcurrent, &ctl.LatestStoredEntryID); err != nil {
+			if err = rows.Scan(&ctl.Id, &ctl.PublicKey, &ctl.Url, &ctl.MMDInSeconds, &ctl.BatchSize, &ctl.RequestsPerMinute, &ctl.RequestsConcurrent, &ctl.LatestStoredEntryID); err != nil {
 				LogPostgresError(err)
 				break
 			} else {

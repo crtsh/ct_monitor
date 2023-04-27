@@ -2,14 +2,21 @@ package ct
 
 import (
 	"bytes"
+	"crypto/x509"
+	"fmt"
 	"sync"
 	"time"
+
+	ctgo "github.com/google/certificate-transparency-go"
 )
 
 type Log struct {
 	Id                  int
 	PublicKey           []byte
+	PubKey              any
+	SigVer              *ctgo.SignatureVerifier
 	Url                 string
+	MMDInSeconds        int
 	BatchSize           int64
 	RequestsPerMinute   int
 	RequestsConcurrent  int
@@ -47,6 +54,14 @@ func UpdateLogList(newctlog map[int]*Log) {
 	// If any logs have been added, add them to the map.
 	for i, newctl := range newctlog {
 		if ctlog[i] == nil { // Add this new log.
+			var err error
+			if newctl.PubKey, err = x509.ParsePKIXPublicKey(newctl.PublicKey); err != nil {
+				panic(fmt.Errorf("could not parse public key: %v", newctl.PublicKey))
+			}
+			if newctl.SigVer, err = ctgo.NewSignatureVerifier(newctl.PubKey); err != nil {
+				panic(fmt.Errorf("could not create signature verifier: %v", newctl.PublicKey))
+			}
+
 			newctl.rateLimiter = time.NewTicker(time.Minute / time.Duration(newctl.RequestsPerMinute))
 			newctl.latestQueuedEntryID = newctl.LatestStoredEntryID
 			newctl.anyQueuedYet = false
