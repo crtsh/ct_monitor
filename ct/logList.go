@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"crypto/x509"
 	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,7 +20,7 @@ type Log struct {
 	Url                 string
 	MMDInSeconds        int
 	BatchSize           int64
-	RequestsPerMinute   int
+	RequestsThrottle    *string
 	RequestsConcurrent  int
 	TreeSize            int64
 	LatestSTHTimestamp  time.Time
@@ -62,7 +64,17 @@ func UpdateLogList(newctlog map[int]*Log) {
 				panic(fmt.Errorf("could not create signature verifier: %v", newctl.PublicKey))
 			}
 
-			newctl.rateLimiter = time.NewTicker(time.Minute / time.Duration(newctl.RequestsPerMinute))
+			if newctl.RequestsThrottle != nil {
+				if s := strings.SplitN(*newctl.RequestsThrottle, "/", 2); len(s) != 2 {
+					panic(fmt.Errorf("could not parse requests throttle ['%s']", *newctl.RequestsThrottle))
+				} else if s0, err := strconv.Atoi(s[0]); err != nil {
+					panic(fmt.Errorf("could not parse requests throttle ['%s' of '%s']", s[0], *newctl.RequestsThrottle))
+				} else if s1, err := time.ParseDuration(s[1]); err != nil {
+					panic(fmt.Errorf("could not parse requests throttle ['%s' of '%s']", s[1], *newctl.RequestsThrottle))
+				} else {
+					newctl.rateLimiter = time.NewTicker(s1 / time.Duration(s0))
+				}
+			}
 			newctl.latestQueuedEntryID = newctl.LatestStoredEntryID
 			newctl.anyQueuedYet = false
 			newctl.getEntries = make(map[int64]*getEntries)
