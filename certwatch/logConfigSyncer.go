@@ -34,7 +34,7 @@ func LogConfigSyncer(ctx context.Context) {
 func syncLogConfig() time.Duration {
 	// Query existing CT log configuration on the certwatch DB.
 	if rows, err := connLogConfigSyncer.Query(context.Background(), `
-SELECT ctl.ID, ctl.PUBLIC_KEY, ctl.URL, ctl.MMD_IN_SECONDS, coalesce(ctl.BATCH_SIZE, 32), ctl.REQUESTS_THROTTLE, coalesce(ctl.REQUESTS_CONCURRENT, 4), coalesce(latest.ENTRY_ID, -1)
+SELECT ctl.ID, ctl.PUBLIC_KEY, ctl.URL, ctl.MMD_IN_SECONDS, coalesce(ctl.BATCH_SIZE, 1024), ctl.REQUESTS_THROTTLE, coalesce(ctl.REQUESTS_CONCURRENT, 8), coalesce(latest.ENTRY_ID, -1)
 	FROM ct_log ctl
 			LEFT JOIN LATERAL (
 				SELECT max(ctle.ENTRY_ID) ENTRY_ID
