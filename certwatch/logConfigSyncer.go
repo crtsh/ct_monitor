@@ -2,6 +2,7 @@ package certwatch
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/crtsh/ct_monitor/config"
@@ -57,6 +58,7 @@ SELECT ctl.ID, ctl.PUBLIC_KEY, ctl.URL, ctl.MMD_IN_SECONDS, coalesce(ctl.BATCH_S
 				LogPostgresError(err)
 				break
 			} else {
+				ctl.Url = strings.Replace(ctl.Url, "//ct.googleapis.com/", "//ct-fixed-ip.googleapis.com/", 1) // This seems to make it go faster!
 				newctlog[ctl.Id] = &ctl
 			}
 		}
