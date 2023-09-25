@@ -24,9 +24,11 @@ type config struct {
 	CTLogs struct {
 		GetSTHFrequency             time.Duration `mapstructure:"getSTHFrequency"`
 		GetEntriesLauncherFrequency time.Duration `mapstructure:"getEntriesLauncherFrequency"`
+		GetEntriesDefaultBatchSize  int           `mapstructure:"getEntriesDefaultBatchSize"`
 		HTTPTimeout                 time.Duration `mapstructure:"httpTimeout"`
 	}
 	Writer struct {
+		NumBackends  int           `mapstructure:"numBackends"`
 		MaxBatchSize int           `mapstructure:"maxBatchSize"`
 		MaxBatchWait time.Duration `mapstructure:"maxBatchWait"`
 	}
@@ -103,7 +105,9 @@ func initViper() error {
 	viper.SetDefault("certwatchdb.password", "")
 	viper.SetDefault("ctlogs.getSTHFrequency", time.Minute)
 	viper.SetDefault("ctlogs.getEntriesLauncherFrequency", 100*time.Millisecond)
+	viper.SetDefault("ctlogs.getEntriesDefaultBatchSize", 256)
 	viper.SetDefault("ctlogs.httpTimeout", 30*time.Second)
+	viper.SetDefault("writer.numBackends", 4)
 	viper.SetDefault("writer.maxBatchSize", 256)
 	viper.SetDefault("writer.maxBatchWait", 5*time.Second)
 	viper.SetDefault("server.monitoringPort", 8081)

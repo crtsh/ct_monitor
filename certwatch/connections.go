@@ -21,8 +21,8 @@ var (
 	connectString        string
 	connectStringToLog   string
 	connLogConfigSyncer  *pgx.Conn
-	connNewEntriesWriter *pgx.Conn
 	connDatabaseWatcher  *pgx.Conn
+	connNewEntriesWriter []*pgx.Conn
 )
 
 func init() {
@@ -43,20 +43,25 @@ func init() {
 	var err error
 	var pgxConfig *pgx.ConnConfig
 	if pgxConfig, err = pgx.ParseConfig(connectString); err != nil {
+		LogPostgresFatal(err)
 	} else if connLogConfigSyncer, err = pgx.ConnectConfig(context.Background(), pgxConfig); err != nil {
-	} else if connNewEntriesWriter, err = pgx.ConnectConfig(context.Background(), pgxConfig); err != nil {
+		LogPostgresFatal(err)
 	} else if connDatabaseWatcher, err = pgx.ConnectConfig(context.Background(), pgxConfig); err != nil {
-	} else {
-		logger.Logger.Info(
-			"Connected to certwatch",
-			zap.String("connect_string", connectStringToLog),
-			zap.Int("connection_count", 3),
-			zap.Duration("elapsed_ns", time.Since(start)),
-		)
-		return
+		LogPostgresFatal(err)
+	}
+	connNewEntriesWriter = make([]*pgx.Conn, config.Config.Writer.NumBackends)
+	for i := 0; i < config.Config.Writer.NumBackends; i++ {
+		if connNewEntriesWriter[i], err = pgx.ConnectConfig(context.Background(), pgxConfig); err != nil {
+			LogPostgresFatal(err)
+		}
 	}
 
-	LogPostgresFatal(err)
+	logger.Logger.Info(
+		"Connected to certwatch",
+		zap.String("connect_string", connectStringToLog),
+		zap.Int("connection_count", 2+config.Config.Writer.NumBackends), // LogConfigSyncer + DatabaseWatcher + N*NewEntriesWriter.
+		zap.Duration("elapsed_ns", time.Since(start)),
+	)
 }
 
 func Close() {
@@ -65,14 +70,17 @@ func Close() {
 		connLogConfigSyncer.Close(context.Background())
 		n++
 	}
-	if connNewEntriesWriter != nil {
-		connNewEntriesWriter.Close(context.Background())
-		n++
-	}
 	if connDatabaseWatcher != nil {
 		connDatabaseWatcher.Close(context.Background())
 		n++
 	}
+	if connNewEntriesWriter != nil {
+		for i := 0; i < config.Config.Writer.NumBackends; i++ {
+			connNewEntriesWriter[i].Close(context.Background())
+			n++
+		}
+	}
+
 	logger.Logger.Info(
 		"Disconnected from certwatch",
 		zap.String("connect_string", connectStringToLog),

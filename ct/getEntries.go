@@ -116,20 +116,6 @@ func (ge *getEntries) callGetEntries() {
 	syncMutex.Unlock()
 }
 
-func isPrecertificate(cert *x509.Certificate, entry_type ctgo.LogEntryType) bool {
-	if cert != nil {
-		for _, ext := range cert.Extensions {
-			if x509.OIDExtensionCTPoison.Equal(ext.Id) && ext.Critical {
-				return true // Precertificate.
-			}
-		}
-	} else if entry_type == ctgo.PrecertLogEntryType {
-		return true // Precertificate.  (We can't parse it, so we have to assume that the log entry type is correct).
-	}
-
-	return false
-}
-
 func (ge *getEntries) processNewEntries(body []byte, start int64, processedEntries *[]msg.NewLogEntry) int64 {
 	var getEntries ctgo.GetEntriesResponse
 	var err error
@@ -153,36 +139,31 @@ func (ge *getEntries) processNewEntries(body []byte, start int64, processedEntri
 			CtLogID: -1,
 		}
 		var issuerCert *x509.Certificate
-		var cert *x509.Certificate
 		for i := len(rle.Chain) - 1; i >= 0; i-- {
-			nle.IssuerVerified = false
 			nle.DerCert = rle.Chain[i].Data
-			cert, err = x509.ParseCertificate(nle.DerCert)
-			if err != nil {
-				logger.Logger.Warn("Could not parse certificate", zap.Error(err), zap.String("logURL", ctlog[ge.ctLogID].Url), zap.Int64("index", rle.Index), zap.Time("timestamp", ctgo.TimestampToTime(rle.Leaf.TimestampedEntry.Timestamp)))
-				cert = nil
+			nle.Sha256Cert = sha256.Sum256(nle.DerCert)
+			nle.IssuerVerified = false
+			if nle.Cert, err = x509.ParseCertificate(nle.DerCert); err != nil {
+				logger.Logger.Warn("Could not parse chain certificate", zap.Error(err), zap.String("logURL", ctlog[ge.ctLogID].Url), zap.Int64("index", rle.Index), zap.Time("timestamp", ctgo.TimestampToTime(rle.Leaf.TimestampedEntry.Timestamp).UTC()))
+				nle.Cert = nil
 			} else if issuerCert != nil {
-				if cert.CheckSignatureFrom(issuerCert) == nil {
+				if nle.Cert.CheckSignatureFrom(issuerCert) == nil {
 					// Signature is valid, so pass the parent certificate's SHA-256 hash.
 					nle.Sha256IssuerCert = sha256.Sum256(issuerCert.Raw)
 					nle.IssuerVerified = true
 				}
 			}
 
-			nle.Sha256Cert = sha256.Sum256(nle.DerCert)
-			nle.IsPrecertificate = isPrecertificate(cert, ctgo.X509LogEntryType)
-
 			// This CA certificate is ready to be sent to the newEntriesWriter.
 			*processedEntries = append(*processedEntries, nle)
 
-			issuerCert = cert
+			issuerCert = nle.Cert
 		}
 
 		// Process the certificate or precertificate entry.
 		nle.CtLogID = ge.ctLogID
-		nle.IssuerVerified = false
 		nle.EntryID = rle.Index
-		nle.EntryTimestamp = ctgo.TimestampToTime(rle.Leaf.TimestampedEntry.Timestamp)
+		nle.EntryTimestamp = ctgo.TimestampToTime(rle.Leaf.TimestampedEntry.Timestamp).UTC()
 		switch entryType := rle.Leaf.TimestampedEntry.EntryType; entryType {
 		case ctgo.X509LogEntryType:
 			nle.DerCert = rle.Leaf.TimestampedEntry.X509Entry.Data
@@ -192,19 +173,13 @@ func (ge *getEntries) processNewEntries(body []byte, start int64, processedEntri
 			logger.Logger.Error("Unknown entry type", zap.String("logURL", ctlog[ge.ctLogID].Url), zap.Int64("index", rle.Index), zap.Uint64("entryType", uint64(entryType)))
 			return index
 		}
-
-		cert, err = x509.ParseCertificate(nle.DerCert)
-		if err != nil {
-			logger.Logger.Warn("Could not parse certificate", zap.Error(err), zap.String("logURL", ctlog[ge.ctLogID].Url), zap.Int64("index", rle.Index), zap.Time("timestamp", nle.EntryTimestamp))
-			cert = nil
-		}
-
 		nle.Sha256Cert = sha256.Sum256(nle.DerCert)
-		nle.IsPrecertificate = isPrecertificate(cert, rle.Leaf.TimestampedEntry.EntryType)
-
-		// Verify the certificate or precertificate's signature, if possible.
-		if (cert != nil) && (issuerCert != nil) {
-			if cert.CheckSignatureFrom(issuerCert) == nil {
+		nle.IssuerVerified = false
+		if nle.Cert, err = x509.ParseCertificate(nle.DerCert); err != nil {
+			logger.Logger.Warn("Could not parse certificate", zap.Error(err), zap.String("logURL", ctlog[ge.ctLogID].Url), zap.Int64("index", rle.Index), zap.Time("timestamp", nle.EntryTimestamp))
+			nle.Cert = nil
+		} else if issuerCert != nil {
+			if nle.Cert.CheckSignatureFrom(issuerCert) == nil {
 				// Signature is valid, so pass the parent certificate's SHA-256 hash.
 				nle.Sha256IssuerCert = sha256.Sum256(issuerCert.Raw)
 				nle.IssuerVerified = true

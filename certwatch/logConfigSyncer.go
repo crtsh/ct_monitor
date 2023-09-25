@@ -2,6 +2,7 @@ package certwatch
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -33,8 +34,8 @@ func LogConfigSyncer(ctx context.Context) {
 
 func syncLogConfig() time.Duration {
 	// Query existing CT log configuration on the certwatch DB.
-	if rows, err := connLogConfigSyncer.Query(context.Background(), `
-SELECT ctl.ID, ctl.PUBLIC_KEY, ctl.URL, ctl.MMD_IN_SECONDS, coalesce(ctl.BATCH_SIZE, 1024), ctl.REQUESTS_THROTTLE, coalesce(ctl.REQUESTS_CONCURRENT, 8), coalesce(latest.ENTRY_ID, -1)
+	if rows, err := connLogConfigSyncer.Query(context.Background(), fmt.Sprintf(`
+SELECT ctl.ID, ctl.PUBLIC_KEY, ctl.URL, ctl.MMD_IN_SECONDS, coalesce(ctl.BATCH_SIZE, %d), ctl.REQUESTS_THROTTLE, coalesce(ctl.REQUESTS_CONCURRENT, 8), coalesce(latest.ENTRY_ID, -1)
 	FROM ct_log ctl
 			LEFT JOIN LATERAL (
 				SELECT max(ctle.ENTRY_ID) ENTRY_ID
@@ -42,7 +43,7 @@ SELECT ctl.ID, ctl.PUBLIC_KEY, ctl.URL, ctl.MMD_IN_SECONDS, coalesce(ctl.BATCH_S
 					WHERE ctle.CT_LOG_ID = ctl.ID
 			) latest ON TRUE
 	WHERE ctl.IS_ACTIVE
-`); err != nil {
+`, config.Config.CTLogs.GetEntriesDefaultBatchSize)); err != nil {
 		logger.Logger.Error(
 			"connLogSyncer.Query failed",
 			zap.Error(err),
