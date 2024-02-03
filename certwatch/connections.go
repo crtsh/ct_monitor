@@ -29,7 +29,7 @@ func init() {
 	start := time.Now()
 
 	// Construct the connect string URI for the "certwatch" PostgreSQL database.
-	connectString = "postgresql:///certwatch?host=" + url.QueryEscape(config.Config.CertWatchDB.Host) + "&application_name=ct_monitor@" + url.QueryEscape(config.GitCommit) + "&user=" + url.QueryEscape(config.Config.CertWatchDB.User)
+	connectString = "postgresql:///certwatch?host=" + url.QueryEscape(config.Config.CertWatchDB.Host) + "&application_name=ct_monitor@" + url.QueryEscape(config.VcsRevision) + "&user=" + url.QueryEscape(config.Config.CertWatchDB.User)
 	if !strings.Contains(config.Config.CertWatchDB.Host, "/") {
 		connectString += fmt.Sprintf("&port=%d", config.Config.CertWatchDB.Port)
 	}

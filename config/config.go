@@ -3,6 +3,7 @@ package config
 import (
 	"math"
 	"os"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -42,8 +43,11 @@ type config struct {
 	}
 }
 
-var Config config
-var GitCommit, GitBranch, GitState, GitSummary, BuildDate, Version string // Automatically populated if built by https://github.com/ahmetb/govvv.
+var (
+	Config                                      config
+	BuildTimestamp                              string // Automatically populated (see Makefile / Dockerfile).
+	Vcs, VcsModified, VcsRevision, VcsTimestamp string
+)
 
 func init() {
 	if err := initViper(); err != nil {
@@ -52,16 +56,27 @@ func init() {
 		panic(err)
 	}
 
-	// Log build information, if the application was built with govvv.
-	if BuildDate != "" {
+	// Log build information.
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		for _, bs := range bi.Settings {
+			switch bs.Key {
+			case "vcs":
+				Vcs = bs.Value
+			case "vcs.modified":
+				VcsModified = bs.Value
+			case "vcs.revision":
+				VcsRevision = bs.Value
+			case "vcs.time":
+				VcsTimestamp = bs.Value
+			}
+		}
 		logger.Logger.Info(
 			"Build information",
-			zap.String("git_commit", GitCommit),
-			zap.String("git_branch", GitBranch),
-			zap.String("git_state", GitState),
-			zap.String("git_summary", GitSummary),
-			zap.String("build_date", BuildDate),
-			zap.String("version", Version),
+			zap.String("build_timestamp", BuildTimestamp),
+			zap.String("vcs", Vcs),
+			zap.String("vcs_modified", VcsModified),
+			zap.String("vcs_revision", VcsRevision),
+			zap.String("vcs_timestamp", VcsTimestamp),
 		)
 	}
 
