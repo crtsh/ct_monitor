@@ -45,7 +45,7 @@ func syncLogConfig() time.Duration {
 		newctlog := make(map[int]*Log)
 		for rows.Next() {
 			var ctl Log
-			if err = rows.Scan(&ctl.Id, &ctl.PublicKey, &ctl.Url, &ctl.Type, &ctl.MMDInSeconds, &ctl.BatchSize, &ctl.RequestsThrottle, &ctl.RequestsConcurrent, &ctl.LatestStoredEntryID); err != nil {
+			if err = rows.Scan(&ctl.Id, &ctl.PublicKey, &ctl.Url, &ctl.SubmissionUrl, &ctl.Type, &ctl.MMDInSeconds, &ctl.BatchSize, &ctl.RequestsThrottle, &ctl.RequestsConcurrent, &ctl.LatestStoredEntryID); err != nil {
 				certwatch.LogPostgresError(err)
 				break
 			} else {

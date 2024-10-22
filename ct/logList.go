@@ -24,6 +24,7 @@ type Log struct {
 	SigVer              *ctgo.SignatureVerifier
 	NoteVerifiers       note.Verifiers
 	Url                 string
+	SubmissionUrl       string
 	Type                string
 	MMDInSeconds        int
 	BatchSize           int64
@@ -72,7 +73,7 @@ func UpdateLogList(newctlog map[int]*Log) {
 					panic(fmt.Errorf("could not create signature verifier: %v", newctl.PublicKey))
 				}
 			} else if newctl.Type == "static" {
-				newctl.KeyName = strings.TrimRight(strings.TrimPrefix(newctl.Url, "https://"), "/")
+				newctl.KeyName = strings.TrimRight(strings.TrimPrefix(newctl.SubmissionUrl, "https://"), "/")
 				if verifier, err := sunlight.NewRFC6962Verifier(newctl.KeyName, newctl.PubKey); err != nil {
 					panic(fmt.Errorf("could not create signature verifier: %v", newctl.PublicKey))
 				} else {
@@ -97,9 +98,10 @@ func UpdateLogList(newctlog map[int]*Log) {
 			newctl.isActive = true
 			ctlog[i] = newctl
 		} else {
-			ctlog[i].Url = newctl.Url   // A log's URL could conceivably be updated but still refer to the exact same log.
-			ctlog[i].Type = newctl.Type // A log's type could conceivably be updated but still refer to the exact same log.
-			ctlog[i].isActive = true    // A log could conceivably be removed then added again on the DB before being removed from the log map.
+			ctlog[i].Url = newctl.Url                     // A log's URL could conceivably be updated but still refer to the exact same log.
+			ctlog[i].SubmissionUrl = newctl.SubmissionUrl // A static log's Submission URL could conceivably be updated but still refer to the exact same log.
+			ctlog[i].Type = newctl.Type                   // A log's type could conceivably be updated but still refer to the exact same log.
+			ctlog[i].isActive = true                      // A log could conceivably be removed then added again on the DB before being removed from the log map.
 			ctlog[i].TreeSize = newctl.TreeSize
 			ctlog[i].LatestSTHTimestamp = newctl.LatestSTHTimestamp
 			ctlog[i].LatestUpdate = newctl.LatestUpdate
