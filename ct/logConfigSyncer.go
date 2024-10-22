@@ -1,13 +1,12 @@
-package certwatch
+package ct
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 
+	"github.com/crtsh/ct_monitor/certwatch"
 	"github.com/crtsh/ct_monitor/config"
-	"github.com/crtsh/ct_monitor/ct"
 	"github.com/crtsh/ct_monitor/logger"
 	"github.com/crtsh/ct_monitor/msg"
 
@@ -34,16 +33,7 @@ func LogConfigSyncer(ctx context.Context) {
 
 func syncLogConfig() time.Duration {
 	// Query existing CT log configuration on the certwatch DB.
-	if rows, err := connLogConfigSyncer.Query(context.Background(), fmt.Sprintf(`
-SELECT ctl.ID, ctl.PUBLIC_KEY, ctl.URL, ctl.MMD_IN_SECONDS, coalesce(ctl.BATCH_SIZE, %d), ctl.REQUESTS_THROTTLE, coalesce(ctl.REQUESTS_CONCURRENT, 8), coalesce(latest.ENTRY_ID, -1)
-	FROM ct_log ctl
-			LEFT JOIN LATERAL (
-				SELECT max(ctle.ENTRY_ID) ENTRY_ID
-					FROM ct_log_entry ctle
-					WHERE ctle.CT_LOG_ID = ctl.ID
-			) latest ON TRUE
-	WHERE ctl.IS_ACTIVE
-`, config.Config.CTLogs.GetEntriesDefaultBatchSize)); err != nil {
+	if rows, err := certwatch.GetConfig(); err != nil {
 		logger.Logger.Error(
 			"connLogSyncer.Query failed",
 			zap.Error(err),
@@ -52,11 +42,11 @@ SELECT ctl.ID, ctl.PUBLIC_KEY, ctl.URL, ctl.MMD_IN_SECONDS, coalesce(ctl.BATCH_S
 		defer rows.Close()
 
 		// Get rows and put them into a slice.
-		newctlog := make(map[int]*ct.Log)
+		newctlog := make(map[int]*Log)
 		for rows.Next() {
-			var ctl ct.Log
-			if err = rows.Scan(&ctl.Id, &ctl.PublicKey, &ctl.Url, &ctl.MMDInSeconds, &ctl.BatchSize, &ctl.RequestsThrottle, &ctl.RequestsConcurrent, &ctl.LatestStoredEntryID); err != nil {
-				LogPostgresError(err)
+			var ctl Log
+			if err = rows.Scan(&ctl.Id, &ctl.PublicKey, &ctl.Url, &ctl.Type, &ctl.MMDInSeconds, &ctl.BatchSize, &ctl.RequestsThrottle, &ctl.RequestsConcurrent, &ctl.LatestStoredEntryID); err != nil {
+				certwatch.LogPostgresError(err)
 				break
 			} else {
 				ctl.Url = strings.Replace(ctl.Url, "//ct.googleapis.com/", "//ct-fixed-ip.googleapis.com/", 1) // This seems to make it go faster!
@@ -65,13 +55,13 @@ SELECT ctl.ID, ctl.PUBLIC_KEY, ctl.URL, ctl.MMD_IN_SECONDS, coalesce(ctl.BATCH_S
 		}
 
 		// If any log has been added or removed to the DB, update the in-memory log list.
-		ct.UpdateLogList(newctlog)
+		UpdateLogList(newctlog)
 
 		// Query the logs for new STHs.
-		if updatedLogs := ct.GetSTHs(); len(updatedLogs) > 0 {
+		if updatedLogs := GetSTHs(); len(updatedLogs) > 0 {
 			// For each new STH observed, update the corresponding CT log record on the DB.
 			var tx pgx.Tx
-			if tx, err = connLogConfigSyncer.Begin(context.Background()); err == nil {
+			if tx, err = certwatch.BeginUpdateConfig(); err == nil {
 				defer tx.Rollback(context.Background())
 
 				if _, err = tx.Exec(context.Background(), `
@@ -98,7 +88,7 @@ CREATE TEMP TABLE getsth_update_temp (
 			}
 
 			if err != nil {
-				LogPostgresError(err)
+				certwatch.LogPostgresError(err)
 			}
 		}
 	}

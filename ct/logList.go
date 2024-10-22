@@ -9,15 +9,22 @@ import (
 	"sync"
 	"time"
 
+	"filippo.io/sunlight"
+
 	ctgo "github.com/google/certificate-transparency-go"
+
+	"golang.org/x/mod/sumdb/note"
 )
 
 type Log struct {
 	Id                  int
 	PublicKey           []byte
 	PubKey              any
+	KeyName             string
 	SigVer              *ctgo.SignatureVerifier
+	NoteVerifiers       note.Verifiers
 	Url                 string
+	Type                string
 	MMDInSeconds        int
 	BatchSize           int64
 	RequestsThrottle    *string
@@ -60,8 +67,17 @@ func UpdateLogList(newctlog map[int]*Log) {
 			if newctl.PubKey, err = x509.ParsePKIXPublicKey(newctl.PublicKey); err != nil {
 				panic(fmt.Errorf("could not parse public key: %v", newctl.PublicKey))
 			}
-			if newctl.SigVer, err = ctgo.NewSignatureVerifier(newctl.PubKey); err != nil {
-				panic(fmt.Errorf("could not create signature verifier: %v", newctl.PublicKey))
+			if newctl.Type == "rfc6962" {
+				if newctl.SigVer, err = ctgo.NewSignatureVerifier(newctl.PubKey); err != nil {
+					panic(fmt.Errorf("could not create signature verifier: %v", newctl.PublicKey))
+				}
+			} else if newctl.Type == "static" {
+				newctl.KeyName = strings.TrimRight(strings.TrimPrefix(newctl.Url, "https://"), "/")
+				if verifier, err := sunlight.NewRFC6962Verifier(newctl.KeyName, newctl.PubKey); err != nil {
+					panic(fmt.Errorf("could not create signature verifier: %v", newctl.PublicKey))
+				} else {
+					newctl.NoteVerifiers = note.VerifierList(verifier)
+				}
 			}
 
 			if newctl.RequestsThrottle != nil {
@@ -81,8 +97,9 @@ func UpdateLogList(newctlog map[int]*Log) {
 			newctl.isActive = true
 			ctlog[i] = newctl
 		} else {
-			ctlog[i].Url = newctl.Url // A log's URL could conceivably be updated but still refer to the exact same log.
-			ctlog[i].isActive = true  // A log could conceivably be removed then added again on the DB before being removed from the log map.
+			ctlog[i].Url = newctl.Url   // A log's URL could conceivably be updated but still refer to the exact same log.
+			ctlog[i].Type = newctl.Type // A log's type could conceivably be updated but still refer to the exact same log.
+			ctlog[i].isActive = true    // A log could conceivably be removed then added again on the DB before being removed from the log map.
 			ctlog[i].TreeSize = newctl.TreeSize
 			ctlog[i].LatestSTHTimestamp = newctl.LatestSTHTimestamp
 			ctlog[i].LatestUpdate = newctl.LatestUpdate

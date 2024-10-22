@@ -41,7 +41,7 @@ func main() {
 
 	// Start the N goroutines.
 	msg.ShutdownWG.Add(3)
-	go certwatch.LogConfigSyncer(ctx)
+	go ct.LogConfigSyncer(ctx)
 	go ct.GetEntriesLauncher(ctx)
 	go certwatch.NewEntriesWriter(ctx)
 

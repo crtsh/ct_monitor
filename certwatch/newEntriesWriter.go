@@ -3,7 +3,6 @@ package certwatch
 import (
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"sync"
@@ -18,18 +17,12 @@ import (
 	"go.uber.org/zap"
 )
 
-type cachedIssuer struct {
-	certID int64
-	caID   sql.NullInt32
-}
-
 func NewEntriesWriter(ctx context.Context) {
 	logger.Logger.Info("Started NewEntriesWriter")
 
 	var entriesToCopy [][]msg.NewLogEntry
 	var ctLogEntriesToCopy [][]any
 	var err error
-	sha256IssuerCache := make(map[[sha256.Size]byte]cachedIssuer)
 	var nCertsIndividuallyImported int
 
 	for {
@@ -46,18 +39,20 @@ func NewEntriesWriter(ctx context.Context) {
 		case nle := <-msg.WriterChan:
 			if (nle.CtLogID == -1) || (nle.Cert == nil) || nle.Cert.IsCA { // CA certificate from an entry's chain, or a (Leaf or CA) (pre)certificate that could not be parsed, or a CA certificate that is itself an entry.
 				// If we found a valid issuer cert for this cert, let's see if we've already cached it.
-				var issuer cachedIssuer
+				var issuer CachedIssuer
 				if nle.IssuerVerified {
-					issuer = sha256IssuerCache[nle.Sha256IssuerCert]
+					issuer, _ = GetCachedIssuer(nle.Sha256IssuerCert)
 				}
 				// If this certificate is not already cached, import it.
-				var subject cachedIssuer
+				var subject CachedIssuer
 				var ok bool
-				if subject, ok = sha256IssuerCache[nle.Sha256Cert]; !ok {
+				if subject, ok = GetCachedIssuer(nle.Sha256Cert); !ok || !subject.storedInDB {
 					if err = connNewEntriesWriter[0].QueryRow(context.Background(), "SELECT * FROM import_any_cert($1,$2)", nle.DerCert, issuer.caID).Scan(&subject.caID, &subject.certID); err == nil {
 						// If this is a CA certificate, cache it now.
 						if subject.caID.Valid {
-							sha256IssuerCache[nle.Sha256Cert] = subject
+							subject.Cert = nle.Cert
+							subject.storedInDB = true
+							SetCachedIssuer(subject, nle.Sha256Cert)
 						}
 						nCertsIndividuallyImported++
 					} else {
@@ -116,9 +111,9 @@ func NewEntriesWriter(ctx context.Context) {
 					for _, entry := range entriesToCopy[backend] {
 						if _, ok := certsCopied[entry.Sha256Cert]; !ok {
 							// If cached, get the issuer details.
-							var issuer cachedIssuer
+							var issuer CachedIssuer
 							if entry.IssuerVerified {
-								issuer = sha256IssuerCache[entry.Sha256IssuerCert]
+								issuer, _ = GetCachedIssuer(entry.Sha256IssuerCert)
 							}
 							// Copy the SHA-256 fingerprint, because entry.Sha256Cert gets overwritten on each iteration of this loop.
 							sha256Cert := make([]byte, 32)

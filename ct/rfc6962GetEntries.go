@@ -18,14 +18,7 @@ import (
 	"go.uber.org/zap"
 )
 
-type getEntries struct {
-	ctLogID        int
-	start          int64
-	end            int64
-	chan_serialize chan struct{}
-}
-
-func (ge *getEntries) callGetEntries() {
+func (ge *getEntries) callRFC6962GetEntries() {
 	// Get relevant log details.
 	syncMutex.RLock()
 	if ctlog[ge.ctLogID] == nil {
@@ -68,7 +61,7 @@ func (ge *getEntries) callGetEntries() {
 					logger.Logger.Error("io.ReadAll failed", zap.Error(err), zap.String("logURL", logURL), zap.Int64("start", start), zap.Int64("end", end))
 				} else {
 					logger.Logger.Debug("New Entries", zap.String("logURL", logURL), zap.Int64("start", start), zap.Int64("end", end))
-					nextEntryNumber = ge.processNewEntries(body, start, &processedEntries)
+					nextEntryNumber = ge.processNewRFC6962Entries(body, start, &processedEntries)
 				}
 			}
 		}
@@ -82,7 +75,7 @@ func (ge *getEntries) callGetEntries() {
 		} else if nextEntryNumber <= end { // get-entries request was truncated.
 			start = nextEntryNumber
 			logger.Logger.Debug("Truncated get-entries", zap.String("logURL", logURL), zap.Int64("start", start), zap.Int64("end", end))
-		} else { // processNewEntries processed more entries than expected!
+		} else { // processNewRFC6962Entries processed more entries than expected!
 			panic("Too many entries found in get-entries response!")
 		}
 	}
@@ -116,18 +109,18 @@ func (ge *getEntries) callGetEntries() {
 	syncMutex.Unlock()
 }
 
-func (ge *getEntries) processNewEntries(body []byte, start int64, processedEntries *[]msg.NewLogEntry) int64 {
-	var getEntries ctgo.GetEntriesResponse
+func (ge *getEntries) processNewRFC6962Entries(body []byte, start int64, processedEntries *[]msg.NewLogEntry) int64 {
+	var ger ctgo.GetEntriesResponse
 	var err error
 	index := start
 
-	if err = json.Unmarshal(body, &getEntries); err != nil {
+	if err = json.Unmarshal(body, &ger); err != nil {
 		logger.Logger.Error("json.Unmarshal failed", zap.Error(err))
 		return index
 	}
 
 	// Loop through the entries.
-	for _, entry := range getEntries.Entries {
+	for _, entry := range ger.Entries {
 		// Construct log entry structure.
 		rle, err := ctgo.RawLogEntryFromLeaf(index, &entry)
 		if err != nil {

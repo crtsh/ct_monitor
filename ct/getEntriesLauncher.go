@@ -9,6 +9,13 @@ import (
 	"github.com/crtsh/ct_monitor/msg"
 )
 
+type getEntries struct {
+	ctLogID        int
+	start          int64
+	end            int64
+	chan_serialize chan struct{}
+}
+
 func GetEntriesLauncher(ctx context.Context) {
 	logger.Logger.Info("Started GetEntriesLauncher")
 
@@ -37,6 +44,12 @@ func launchGetEntries() time.Duration {
 					end:            ctl.latestQueuedEntryID + ctl.BatchSize,
 					chan_serialize: make(chan struct{}, 1),
 				}
+				if ctl.Type == "static" && (ge.end%ENTRIES_PER_TILE != ENTRIES_PER_TILE-1) {
+					ge.end -= (ge.end%ENTRIES_PER_TILE + 1)
+					if ge.end-ge.start <= 0 {
+						ge.end += ENTRIES_PER_TILE
+					}
+				}
 				if ge.end > ctl.TreeSize-1 {
 					ge.end = ctl.TreeSize - 1
 				}
@@ -48,7 +61,11 @@ func launchGetEntries() time.Duration {
 					ctl.anyQueuedYet = true // Each subsequent get-entries goroutine will need to wait to be signaled by the preceding one.
 					ge.chan_serialize <- struct{}{}
 				}
-				go ge.callGetEntries()
+				if ctl.Type == "rfc6962" {
+					go ge.callRFC6962GetEntries()
+				} else if ctl.Type == "static" {
+					go ge.callStaticGetEntries()
+				}
 			}
 		}
 	}
