@@ -31,7 +31,7 @@ func (ge *getEntries) callRFC6962GetEntries() {
 	syncMutex.RUnlock()
 
 	var processedEntries []msg.NewLogEntry
-	for retry := true; retry; {
+	for {
 		// Apply HTTP request rate-limiting.
 		syncMutex.RLock()
 		tt := ctlog[ge.ctLogID].rateLimiter
@@ -69,7 +69,7 @@ func (ge *getEntries) callRFC6962GetEntries() {
 		// Check if a retry is needed.
 		if nextEntryNumber == end+1 { // get-entries request was successful.
 			logger.Logger.Debug("Successful get-entries", zap.String("logURL", logURL), zap.Int64("start", start), zap.Int64("end", end))
-			retry = false
+			break
 		} else if nextEntryNumber == -1 { // get-entries request failed.
 			logger.Logger.Debug("Failed get-entries", zap.String("logURL", logURL), zap.Int64("start", start), zap.Int64("end", end))
 		} else if nextEntryNumber <= end { // get-entries request was truncated.
@@ -78,6 +78,8 @@ func (ge *getEntries) callRFC6962GetEntries() {
 		} else { // processNewRFC6962Entries processed more entries than expected!
 			panic("Too many entries found in get-entries response!")
 		}
+
+		time.Sleep(10 * time.Second) // Wait 10s before retrying.
 	}
 
 	// Wait for serialized access, then write the newly processed entries to the newEntryWriter.

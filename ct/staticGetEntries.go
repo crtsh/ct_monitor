@@ -34,7 +34,7 @@ func (ge *getEntries) callStaticGetEntries() {
 	syncMutex.RUnlock()
 
 	var processedEntries []msg.NewLogEntry
-	for retry := true; retry; {
+	for {
 		// Apply HTTP request rate-limiting.
 		syncMutex.RLock()
 		tt := ctlog[ge.ctLogID].rateLimiter
@@ -72,7 +72,7 @@ func (ge *getEntries) callStaticGetEntries() {
 		// Check if a retry is needed.
 		if nextEntryNumber == end+1 { // Tile data fetch request was successful.
 			logger.Logger.Debug("Successful tile data fetch", zap.String("tileDataURL", tileDataURL), zap.Int64("start", start), zap.Int64("end", end))
-			retry = false
+			break
 		} else if nextEntryNumber == -1 { // Tile data fetch request failed.
 			logger.Logger.Debug("Failed tile data fetch", zap.String("tileDataURL", tileDataURL), zap.Int64("start", start), zap.Int64("end", end))
 		} else if nextEntryNumber <= end { // Tile data fetch request was truncated.
@@ -81,6 +81,8 @@ func (ge *getEntries) callStaticGetEntries() {
 		} else { // processNewStaticEntries processed more entries than expected!
 			panic("Too many entries found in tile data response!")
 		}
+
+		time.Sleep(10 * time.Second) // Wait 10s before retrying.
 	}
 
 	// Wait for serialized access, then write the newly processed entries to the newEntryWriter.
