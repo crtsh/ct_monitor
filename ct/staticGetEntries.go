@@ -64,7 +64,7 @@ func (ge *getEntries) callStaticGetEntries() {
 					logger.Logger.Error("io.ReadAll failed", zap.Error(err), zap.String("logURL", logURL), zap.Int64("start", start), zap.Int64("end", end))
 				} else {
 					logger.Logger.Debug("New Entries", zap.String("logURL", logURL), zap.Int64("start", start), zap.Int64("end", end))
-					nextEntryNumber = ge.processNewStaticEntries(body, start, tileStart, &processedEntries)
+					nextEntryNumber = ge.processNewStaticEntries(body, start, end, tileStart, &processedEntries)
 				}
 			}
 		}
@@ -137,12 +137,12 @@ func tilePath(tileNumber int64) string {
 	return str
 }
 
-func (ge *getEntries) processNewStaticEntries(body []byte, start, tileStart int64, processedEntries *[]msg.NewLogEntry) int64 {
+func (ge *getEntries) processNewStaticEntries(body []byte, start, end, tileStart int64, processedEntries *[]msg.NewLogEntry) int64 {
 	var err error
 	var index int64
 
 	// Loop through the entries.
-	for index = tileStart; index < tileStart+ENTRIES_PER_TILE; index++ {
+	for index = tileStart; index <= end; index++ {
 		var entry *sunlight.LogEntry
 		if entry, body, err = sunlight.ReadTileLeaf(body); err != nil {
 			logger.Logger.Error("Could not process entry", zap.Error(err), zap.String("logURL", ctlog[ge.ctLogID].Url), zap.Int64("index", index))
