@@ -74,7 +74,7 @@ func (ge *getEntries) callRFC6962GetEntries() {
 			logger.Logger.Debug("Failed get-entries", zap.String("logURL", logURL), zap.Int64("start", start), zap.Int64("end", end))
 		} else if nextEntryNumber <= end { // get-entries request was truncated.
 			start = nextEntryNumber
-			logger.Logger.Debug("Truncated get-entries", zap.String("logURL", logURL), zap.Int64("start", start), zap.Int64("end", end))
+			logger.Logger.Debug("Truncated get-entries", zap.String("logURL", logURL), zap.Int64("start", start), zap.Int64("end", end), zap.Int64("next", nextEntryNumber))
 		} else { // processNewRFC6962Entries processed more entries than expected!
 			panic("Too many entries found in get-entries response!")
 		}

@@ -41,13 +41,13 @@ func launchGetEntries() time.Duration {
 				ge := getEntries{
 					ctLogID:        id,
 					start:          ctl.latestQueuedEntryID + 1,
-					end:            ctl.latestQueuedEntryID + ctl.BatchSize,
+					end:            ctl.latestQueuedEntryID + ctl.BatchSize, // ctl.BatchSize is hard-coded to 256 for Static logs.
 					chan_serialize: make(chan struct{}, 1),
 				}
-				if ctl.Type == "static" && (ge.end%ENTRIES_PER_TILE != ENTRIES_PER_TILE-1) {
-					ge.end -= (ge.end%ENTRIES_PER_TILE + 1)
+				if ge.end%ctl.BatchSize != ctl.BatchSize-1 {
+					ge.end -= (ge.end%ctl.BatchSize + 1)
 					if ge.end-ge.start <= 0 {
-						ge.end += ENTRIES_PER_TILE
+						ge.end += ctl.BatchSize
 					}
 				}
 				if ge.end > ctl.TreeSize-1 {
