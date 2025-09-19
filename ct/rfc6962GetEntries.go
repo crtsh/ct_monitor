@@ -79,7 +79,7 @@ func (ge *getEntries) callRFC6962GetEntries() {
 			panic("Too many entries found in get-entries response!")
 		}
 
-		time.Sleep(10 * time.Second) // Wait 10s before retrying.
+		time.Sleep(2 * time.Second) // Wait 2s before retrying.
 	}
 
 	// Wait for serialized access, then write the newly processed entries to the newEntryWriter.
