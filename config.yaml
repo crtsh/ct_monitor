@@ -5,5 +5,8 @@ ctlogs:
   httpTimeout: 30s
 server:
   monitoringPort: 8081
+writer:
+  numBackends: 12
+  maxBatchSize: 512
 logging:
   isDevelopment: false
