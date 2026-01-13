@@ -44,12 +44,13 @@ func (ge *getEntries) callStaticGetEntries() {
 		}
 
 		// Call this log's tile data API.
-		tileDataURL, tileStart := determineTileDataURL(logURL, start, end)
+		isPartialTileURL, tileDataURL, tileStart := determineTileDataURL(logURL, start, end)
 		var httpRequest *http.Request
 		var httpResponse *http.Response
 		var body []byte
 		nextEntryNumber := int64(-1)
 		var err error
+		sleepFor := 2 * time.Second
 		if httpRequest, err = http.NewRequest(http.MethodGet, tileDataURL, nil); err != nil {
 			logger.Logger.Error("http.NewRequest failed", zap.Error(err))
 		} else {
@@ -58,7 +59,10 @@ func (ge *getEntries) callStaticGetEntries() {
 				logger.Logger.Warn("Tile fetch failed", zap.String("tile_data_url", tileDataURL), zap.Error(err))
 			} else {
 				defer httpResponse.Body.Close()
-				if httpResponse.StatusCode != http.StatusOK {
+				if httpResponse.StatusCode == http.StatusNotFound && isPartialTileURL {
+					logger.Logger.Info("Partial tile no longer present; will retry with full tile URL", zap.String("tileDataURL", tileDataURL), zap.Int64("start", start), zap.Int64("end", end))
+					sleepFor = 30 * time.Second
+				} else if httpResponse.StatusCode != http.StatusOK {
 					logger.Logger.Error(fmt.Sprintf("HTTP %d", httpResponse.StatusCode), zap.Error(err), zap.String("logURL", logURL), zap.Int64("start", start), zap.Int64("end", end))
 				} else if body, err = io.ReadAll(httpResponse.Body); err != nil {
 					logger.Logger.Error("io.ReadAll failed", zap.Error(err), zap.String("logURL", logURL), zap.Int64("start", start), zap.Int64("end", end))
@@ -82,7 +86,7 @@ func (ge *getEntries) callStaticGetEntries() {
 			panic("Too many entries found in tile data response!")
 		}
 
-		time.Sleep(2 * time.Second) // Wait 2s before retrying.
+		time.Sleep(sleepFor)
 	}
 
 	// Wait for serialized access, then write the newly processed entries to the newEntryWriter.
@@ -117,13 +121,13 @@ func (ge *getEntries) callStaticGetEntries() {
 const TILE_HEIGHT = 8
 const ENTRIES_PER_TILE = 1 << TILE_HEIGHT
 
-func determineTileDataURL(logURL string, start, end int64) (string, int64) {
+func determineTileDataURL(logURL string, start, end int64) (bool, string, int64) {
 	tileNumber := start / ENTRIES_PER_TILE
 	tileStart := tileNumber * ENTRIES_PER_TILE
 	if nEntriesToFetch := end + 1 - tileStart; nEntriesToFetch < ENTRIES_PER_TILE {
-		return fmt.Sprintf("%s/tile/data/%s.p/%d", logURL, tilePath(tileNumber), nEntriesToFetch), tileStart
+		return true, fmt.Sprintf("%s/tile/data/%s.p/%d", logURL, tilePath(tileNumber), nEntriesToFetch), tileStart
 	} else {
-		return fmt.Sprintf("%s/tile/data/%s", logURL, tilePath(tileNumber)), tileStart
+		return false, fmt.Sprintf("%s/tile/data/%s", logURL, tilePath(tileNumber)), tileStart
 	}
 }
 
