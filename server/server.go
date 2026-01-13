@@ -20,6 +20,10 @@ func monitoringHandler(ctx *fasthttp.RequestCtx) {
 		healthz(ctx)
 	case "/metrics":
 		metrics(ctx)
+	case "/debug/build":
+		buildInfo(ctx)
+	case "/debug/config":
+		configInfo(ctx)
 	default:
 		if !profilingHandler(ctx) {
 			ctx.NotFound()
