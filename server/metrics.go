@@ -1,6 +1,8 @@
 package server
 
 import (
+	"github.com/crtsh/ct_monitor/config"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -34,14 +36,14 @@ func initFastHTTPMetrics() {
 	// Configure prometheus gauges.
 	for i := 0; i < len(serverLabel); i++ {
 		fhConcurrency[i] = promauto.NewGauge(prometheus.GaugeOpts{
-			Namespace:   "ct_monitor",
+			Namespace:   config.ApplicationNamespace,
 			Subsystem:   "fasthttp",
 			Name:        "concurrency",
 			Help:        "Number of currently served HTTP connections.",
 			ConstLabels: map[string]string{"server": serverLabel[i]},
 		})
 		fhOpenConnections[i] = promauto.NewGauge(prometheus.GaugeOpts{
-			Namespace:   "ct_monitor",
+			Namespace:   config.ApplicationNamespace,
 			Subsystem:   "fasthttp",
 			Name:        "open",
 			Help:        "Number of currently open HTTP connections.",

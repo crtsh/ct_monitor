@@ -44,12 +44,24 @@ type config struct {
 }
 
 var (
-	Config                                      config
-	BuildTimestamp                              string // Automatically populated (see Makefile / Dockerfile).
+	ApplicationName      string
+	ApplicationNamespace string
+	Config               config
+
+	// Automatically populated by the build system (see Makefile / Dockerfile).
+	BuildTimestamp                              string
 	Vcs, VcsModified, VcsRevision, VcsTimestamp string
 )
 
 func init() {
+	// Determine the application name and namespace.
+	if path, err := os.Executable(); err != nil {
+		panic(err)
+	} else {
+		ApplicationName = path[strings.LastIndex(path, "/")+1:]
+		ApplicationNamespace = strings.ToLower(strings.ReplaceAll(strings.ReplaceAll(ApplicationName, "-", ""), "_", ""))
+	}
+
 	if err := initViper(); err != nil {
 		panic(err)
 	} else if err = logger.InitLogger(Config.Logging.IsDevelopment, Config.Logging.SamplingInitial, Config.Logging.SamplingThereafter); err != nil {
@@ -106,7 +118,7 @@ func initViper() error {
 	viper.AddConfigPath(".")        // ./config.yaml
 
 	// Setup Viper to also look at environment variables.
-	viper.SetEnvPrefix("ctmonitor")
+	viper.SetEnvPrefix(ApplicationNamespace)
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_")) // Fix for nested struct references (https://github.com/spf13/viper/issues/160#issuecomment-189551355).
 	viper.AutomaticEnv()
 
