@@ -35,7 +35,7 @@ func GetEntriesLauncher(ctx context.Context) {
 func launchGetEntries() time.Duration {
 	syncMutex.Lock()
 	for id, ctl := range ctlog {
-		if ctl.isActive {
+		if ctl.isActive && !ctl.isTestLog {
 			for j := len(ctl.getEntries); j < ctl.RequestsConcurrent && (ctl.latestQueuedEntryID < (ctl.TreeSize - 1)); j++ {
 				// Prepare a new get-entries call.
 				ge := getEntries{

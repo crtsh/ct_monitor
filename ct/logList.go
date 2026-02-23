@@ -39,6 +39,7 @@ type Log struct {
 	LatestStoredEntryID int64
 	getEntries          map[int64]*getEntries
 	isActive            bool
+	isTestLog           bool
 }
 
 var ctlog map[int]*Log

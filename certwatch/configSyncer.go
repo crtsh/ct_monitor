@@ -11,7 +11,7 @@ import (
 
 func GetConfig() (pgx.Rows, error) {
 	return connLogConfigSyncer.Query(context.Background(), fmt.Sprintf(`
-	SELECT ctl.ID, ctl.PUBLIC_KEY, ctl.URL, coalesce(ctl.SUBMISSION_URL, ctl.URL), ctl.TYPE, ctl.MMD_IN_SECONDS,
+	SELECT ctl.ID, ctl.PUBLIC_KEY, ctl.URL, coalesce(ctl.SUBMISSION_URL, ctl.URL), ctl.TYPE, ctl.MMD_IN_SECONDS, ctl.IS_TEST_LOG,
 			CASE WHEN ctl.TYPE = 'rfc6962' THEN coalesce(ctl.BATCH_SIZE, %d) ELSE 256 END,
 			ctl.REQUESTS_THROTTLE, coalesce(ctl.REQUESTS_CONCURRENT, 8), coalesce(latest.ENTRY_ID, -1)
 		FROM ct_log ctl
