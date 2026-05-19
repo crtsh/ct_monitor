@@ -44,8 +44,8 @@ func syncLogConfig() time.Duration {
 		var ctl Log
 		if _, err = pgx.ForEachRow(rows, []any{&ctl.Id, &ctl.PublicKey, &ctl.Url, &ctl.SubmissionUrl, &ctl.Type, &ctl.MMDInSeconds, &ctl.isTestLog, &ctl.BatchSize, &ctl.RequestsThrottle, &ctl.RequestsConcurrent, &ctl.LatestStoredEntryID}, func() error {
 			ctl.Url = strings.Replace(ctl.Url, "//ct.googleapis.com/", "//ct-fixed-ip.googleapis.com/", 1) // This seems to make it go faster!
-			newctlog[ctl.Id] = &ctl
-			ctl = Log{}
+			ctlCopy := ctl
+			newctlog[ctlCopy.Id] = &ctlCopy
 			return nil
 		}); err != nil {
 			certwatch.LogPostgresError(err)
