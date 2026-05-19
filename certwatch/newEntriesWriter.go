@@ -104,6 +104,7 @@ func NewEntriesWriter(ctx context.Context) {
 				backendWG.Add(1)
 
 				go func(backend int) {
+					var err error // Local error variable for this goroutine, to avoid a data race.
 					// Deduplicate the leaf certificates to import in this batch.
 					certsCopied := make(map[[sha256.Size]byte]struct{})
 					certsReturned := make(map[[sha256.Size]byte]int64)
