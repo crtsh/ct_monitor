@@ -69,11 +69,12 @@ func UpdateLogList(newctlog map[int]*Log) {
 			if newctl.PubKey, err = x509.ParsePKIXPublicKey(newctl.PublicKey); err != nil {
 				panic(fmt.Errorf("could not parse public key: %v", newctl.PublicKey))
 			}
-			if newctl.Type == "rfc6962" {
+			switch newctl.Type {
+			case "rfc6962":
 				if newctl.SigVer, err = ctgo.NewSignatureVerifier(newctl.PubKey); err != nil {
 					panic(fmt.Errorf("could not create signature verifier: %v", newctl.PublicKey))
 				}
-			} else if newctl.Type == "static" {
+			case "static":
 				newctl.KeyName = strings.TrimRight(strings.TrimPrefix(newctl.SubmissionUrl, "https://"), "/")
 				if verifier, err := sunlight.NewRFC6962Verifier(newctl.KeyName, newctl.PubKey); err != nil {
 					panic(fmt.Errorf("could not create signature verifier: %v", newctl.PublicKey))
