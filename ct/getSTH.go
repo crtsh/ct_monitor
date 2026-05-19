@@ -71,7 +71,8 @@ func getSTH(i int) Log {
 	}
 	syncMutex.RUnlock()
 
-	if logType == "rfc6962" {
+	switch logType {
+	case "rfc6962":
 		// Call this RFC6962 log's /ct/v1/get-sth API.
 		if httpRequest, err := http.NewRequest(http.MethodGet, logURL+"/ct/v1/get-sth", nil); err != nil {
 			logger.Logger.Error("http.NewRequest failed", zap.Error(err))
@@ -146,7 +147,7 @@ func getSTH(i int) Log {
 			}
 		}
 
-	} else if logType == "static" {
+	case "static":
 		// Call this Static log's /checkpoint API.
 		if httpRequest, err := http.NewRequest(http.MethodGet, logURL+"/checkpoint", nil); err != nil {
 			logger.Logger.Error("http.NewRequest failed", zap.Error(err))

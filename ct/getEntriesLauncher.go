@@ -61,9 +61,10 @@ func launchGetEntries() time.Duration {
 					ctl.anyQueuedYet = true // Each subsequent get-entries goroutine will need to wait to be signaled by the preceding one.
 					ge.chan_serialize <- struct{}{}
 				}
-				if ctl.Type == "rfc6962" {
+				switch ctl.Type {
+				case "rfc6962":
 					go ge.callRFC6962GetEntries()
-				} else if ctl.Type == "static" {
+				case "static":
 					go ge.callStaticGetEntries()
 				}
 			}
