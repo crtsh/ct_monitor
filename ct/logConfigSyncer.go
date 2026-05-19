@@ -39,19 +39,16 @@ func syncLogConfig() time.Duration {
 			zap.Error(err),
 		)
 	} else {
-		defer rows.Close()
-
-		// Get rows and put them into a slice.
+		// Get rows and put them into a map.
 		newctlog := make(map[int]*Log)
-		for rows.Next() {
-			var ctl Log
-			if err = rows.Scan(&ctl.Id, &ctl.PublicKey, &ctl.Url, &ctl.SubmissionUrl, &ctl.Type, &ctl.MMDInSeconds, &ctl.isTestLog, &ctl.BatchSize, &ctl.RequestsThrottle, &ctl.RequestsConcurrent, &ctl.LatestStoredEntryID); err != nil {
-				certwatch.LogPostgresError(err)
-				break
-			} else {
-				ctl.Url = strings.Replace(ctl.Url, "//ct.googleapis.com/", "//ct-fixed-ip.googleapis.com/", 1) // This seems to make it go faster!
-				newctlog[ctl.Id] = &ctl
-			}
+		var ctl Log
+		if _, err = pgx.ForEachRow(rows, []any{&ctl.Id, &ctl.PublicKey, &ctl.Url, &ctl.SubmissionUrl, &ctl.Type, &ctl.MMDInSeconds, &ctl.isTestLog, &ctl.BatchSize, &ctl.RequestsThrottle, &ctl.RequestsConcurrent, &ctl.LatestStoredEntryID}, func() error {
+			ctl.Url = strings.Replace(ctl.Url, "//ct.googleapis.com/", "//ct-fixed-ip.googleapis.com/", 1) // This seems to make it go faster!
+			newctlog[ctl.Id] = &ctl
+			ctl = Log{}
+			return nil
+		}); err != nil {
+			certwatch.LogPostgresError(err)
 		}
 
 		// If any log has been added or removed to the DB, update the in-memory log list.

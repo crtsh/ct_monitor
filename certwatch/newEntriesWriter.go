@@ -104,7 +104,6 @@ func NewEntriesWriter(ctx context.Context) {
 				backendWG.Add(1)
 
 				go func(backend int) {
-					var err error // Local error variable for this goroutine, to avoid a data race.
 					// Deduplicate the leaf certificates to import in this batch.
 					certsCopied := make(map[[sha256.Size]byte]struct{})
 					certsReturned := make(map[[sha256.Size]byte]int64)
@@ -127,6 +126,9 @@ func NewEntriesWriter(ctx context.Context) {
 					}
 
 					// Start a transaction.
+					var err error
+					var certID int64
+					var certSHA256Slice []byte
 					var rows pgx.Rows
 					var tx pgx.Tx
 					if tx, err = connNewEntriesWriter[backend].Begin(context.Background()); err != nil {
@@ -156,19 +158,12 @@ CREATE TEMP TABLE importleafcerts_temp (
 						goto done
 					}
 					// Construct a SHA-256(Certificate) -> Certificate ID map of all the leaf certificates (new and old) in the temporary table.
-					for rows.Next() {
-						var certID int64
-						var certSHA256Slice []byte
+					if _, err = pgx.ForEachRow(rows, []any{&certID, &certSHA256Slice}, func() error {
 						var certSHA256Array [sha256.Size]byte
-						if err = rows.Scan(&certID, &certSHA256Slice); err != nil {
-							break
-						} else {
-							copy(certSHA256Array[:], certSHA256Slice)
-							certsReturned[certSHA256Array] = certID
-						}
-					}
-					rows.Close()
-					if err != nil {
+						copy(certSHA256Array[:], certSHA256Slice)
+						certsReturned[certSHA256Array] = certID
+						return nil
+					}); err != nil {
 						goto done
 					}
 
