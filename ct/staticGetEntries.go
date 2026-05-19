@@ -68,7 +68,7 @@ func (ge *getEntries) callStaticGetEntries() {
 					logger.Logger.Error("io.ReadAll failed", zap.Error(err), zap.String("logURL", logURL), zap.Int64("start", start), zap.Int64("end", end))
 				} else {
 					logger.Logger.Debug("New Entries", zap.String("logURL", logURL), zap.Int64("start", start), zap.Int64("end", end))
-					nextEntryNumber = ge.processNewStaticEntries(body, start, end, tileStart, &processedEntries)
+					nextEntryNumber = ge.processNewStaticEntries(logURL, body, start, end, tileStart, &processedEntries)
 				}
 			}
 		}
@@ -141,7 +141,7 @@ func tilePath(tileNumber int64) string {
 	return str
 }
 
-func (ge *getEntries) processNewStaticEntries(body []byte, start, end, tileStart int64, processedEntries *[]msg.NewLogEntry) int64 {
+func (ge *getEntries) processNewStaticEntries(logURL string, body []byte, start, end, tileStart int64, processedEntries *[]msg.NewLogEntry) int64 {
 	var err error
 	var index int64
 
@@ -149,13 +149,13 @@ func (ge *getEntries) processNewStaticEntries(body []byte, start, end, tileStart
 	for index = tileStart; index <= end; index++ {
 		var entry *sunlight.LogEntry
 		if entry, body, err = sunlight.ReadTileLeaf(body); err != nil {
-			logger.Logger.Error("Could not process entry", zap.Error(err), zap.String("logURL", ctlog[ge.ctLogID].Url), zap.Int64("index", index))
+			logger.Logger.Error("Could not process entry", zap.Error(err), zap.String("logURL", logURL), zap.Int64("index", index))
 			return index
 		} else if index < start {
 			logger.Logger.Debug("Skipping previously processed entry", zap.Int64("index", index))
 			continue
 		} else if entry.LeafIndex != index {
-			logger.Logger.Error("Unexpected entry index", zap.String("logURL", ctlog[ge.ctLogID].Url), zap.Int64("index", index), zap.Int64("entry.LeafIndex", entry.LeafIndex))
+			logger.Logger.Error("Unexpected entry index", zap.String("logURL", logURL), zap.Int64("index", index), zap.Int64("entry.LeafIndex", entry.LeafIndex))
 			return index
 		}
 
@@ -169,17 +169,17 @@ func (ge *getEntries) processNewStaticEntries(body []byte, start, end, tileStart
 			nle.DerCert = certwatch.FetchIssuer(entry.ChainFingerprints[i])
 			// If still not found, fetch the issuer certificate from the log.
 			if nle.DerCert == nil {
-				nle.DerCert = getChainCertificate(ctlog[ge.ctLogID].Url, entry.ChainFingerprints[i])
+				nle.DerCert = getChainCertificate(logURL, entry.ChainFingerprints[i])
 				addToCache = true
 			}
 			if nle.DerCert == nil {
-				logger.Logger.Error("Could not find chain certificate", zap.String("logURL", ctlog[ge.ctLogID].Url), zap.Int64("index", entry.LeafIndex), zap.Time("timestamp", nle.EntryTimestamp))
+				logger.Logger.Error("Could not find chain certificate", zap.String("logURL", logURL), zap.Int64("index", entry.LeafIndex), zap.Time("timestamp", nle.EntryTimestamp))
 				return index
 			}
 			nle.Sha256Cert = sha256.Sum256(nle.DerCert)
 			nle.IssuerVerified = false
 			if nle.Cert, err = x509.ParseCertificate(nle.DerCert); err != nil {
-				logger.Logger.Warn("Could not parse chain certificate", zap.Error(err), zap.String("logURL", ctlog[ge.ctLogID].Url), zap.Int64("index", entry.LeafIndex), zap.Time("timestamp", nle.EntryTimestamp))
+				logger.Logger.Warn("Could not parse chain certificate", zap.Error(err), zap.String("logURL", logURL), zap.Int64("index", entry.LeafIndex), zap.Time("timestamp", nle.EntryTimestamp))
 				nle.Cert = nil
 			} else if issuerCert != nil {
 				if nle.Cert.CheckSignatureFrom(issuerCert) == nil {
@@ -214,7 +214,7 @@ func (ge *getEntries) processNewStaticEntries(body []byte, start, end, tileStart
 		nle.Sha256Cert = sha256.Sum256(nle.DerCert)
 		nle.IssuerVerified = false
 		if nle.Cert, err = x509.ParseCertificate(nle.DerCert); err != nil {
-			logger.Logger.Warn("Could not parse certificate", zap.Error(err), zap.String("logURL", ctlog[ge.ctLogID].Url), zap.Int64("index", nle.EntryID), zap.Time("timestamp", nle.EntryTimestamp))
+			logger.Logger.Warn("Could not parse certificate", zap.Error(err), zap.String("logURL", logURL), zap.Int64("index", nle.EntryID), zap.Time("timestamp", nle.EntryTimestamp))
 			nle.Cert = nil
 		} else if issuerCert != nil {
 			if nle.Cert.CheckSignatureFrom(issuerCert) == nil {

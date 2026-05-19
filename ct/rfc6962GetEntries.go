@@ -61,7 +61,7 @@ func (ge *getEntries) callRFC6962GetEntries() {
 					logger.Logger.Error("io.ReadAll failed", zap.Error(err), zap.String("logURL", logURL), zap.Int64("start", start), zap.Int64("end", end))
 				} else {
 					logger.Logger.Debug("New Entries", zap.String("logURL", logURL), zap.Int64("start", start), zap.Int64("end", end))
-					nextEntryNumber = ge.processNewRFC6962Entries(body, start, &processedEntries)
+					nextEntryNumber = ge.processNewRFC6962Entries(logURL, body, start, &processedEntries)
 				}
 			}
 		}
@@ -111,7 +111,7 @@ func (ge *getEntries) callRFC6962GetEntries() {
 	syncMutex.Unlock()
 }
 
-func (ge *getEntries) processNewRFC6962Entries(body []byte, start int64, processedEntries *[]msg.NewLogEntry) int64 {
+func (ge *getEntries) processNewRFC6962Entries(logURL string, body []byte, start int64, processedEntries *[]msg.NewLogEntry) int64 {
 	var ger ctgo.GetEntriesResponse
 	var err error
 	index := start
@@ -126,7 +126,7 @@ func (ge *getEntries) processNewRFC6962Entries(body []byte, start int64, process
 		// Construct log entry structure.
 		rle, err := ctgo.RawLogEntryFromLeaf(index, &entry)
 		if err != nil {
-			logger.Logger.Error("Could not process entry", zap.Error(err), zap.String("logURL", ctlog[ge.ctLogID].Url), zap.Int64("index", index))
+			logger.Logger.Error("Could not process entry", zap.Error(err), zap.String("logURL", logURL), zap.Int64("index", index))
 			return index
 		}
 
@@ -139,7 +139,7 @@ func (ge *getEntries) processNewRFC6962Entries(body []byte, start int64, process
 			nle.Sha256Cert = sha256.Sum256(nle.DerCert)
 			nle.IssuerVerified = false
 			if nle.Cert, err = x509.ParseCertificate(nle.DerCert); err != nil {
-				logger.Logger.Warn("Could not parse chain certificate", zap.Error(err), zap.String("logURL", ctlog[ge.ctLogID].Url), zap.Int64("index", rle.Index), zap.Time("timestamp", ctgo.TimestampToTime(rle.Leaf.TimestampedEntry.Timestamp).UTC()))
+				logger.Logger.Warn("Could not parse chain certificate", zap.Error(err), zap.String("logURL", logURL), zap.Int64("index", rle.Index), zap.Time("timestamp", ctgo.TimestampToTime(rle.Leaf.TimestampedEntry.Timestamp).UTC()))
 				nle.Cert = nil
 			} else if issuerCert != nil {
 				if nle.Cert.CheckSignatureFrom(issuerCert) == nil {
@@ -165,13 +165,13 @@ func (ge *getEntries) processNewRFC6962Entries(body []byte, start int64, process
 		case ctgo.PrecertLogEntryType:
 			nle.DerCert = rle.Cert.Data
 		default:
-			logger.Logger.Error("Unknown entry type", zap.String("logURL", ctlog[ge.ctLogID].Url), zap.Int64("index", rle.Index), zap.Uint64("entryType", uint64(entryType)))
+			logger.Logger.Error("Unknown entry type", zap.String("logURL", logURL), zap.Int64("index", rle.Index), zap.Uint64("entryType", uint64(entryType)))
 			return index
 		}
 		nle.Sha256Cert = sha256.Sum256(nle.DerCert)
 		nle.IssuerVerified = false
 		if nle.Cert, err = x509.ParseCertificate(nle.DerCert); err != nil {
-			logger.Logger.Warn("Could not parse certificate", zap.Error(err), zap.String("logURL", ctlog[ge.ctLogID].Url), zap.Int64("index", rle.Index), zap.Time("timestamp", nle.EntryTimestamp))
+			logger.Logger.Warn("Could not parse certificate", zap.Error(err), zap.String("logURL", logURL), zap.Int64("index", rle.Index), zap.Time("timestamp", nle.EntryTimestamp))
 			nle.Cert = nil
 		} else if issuerCert != nil {
 			if nle.Cert.CheckSignatureFrom(issuerCert) == nil {
