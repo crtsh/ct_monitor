@@ -47,21 +47,18 @@ func syncLogConfig() time.Duration {
 			ctlCopy := ctl
 			newctlog[ctlCopy.Id] = &ctlCopy
 			return nil
-		}); err != nil {
-			certwatch.LogPostgresError(err)
-		}
+		}); err == nil {
+			// If any log has been added or removed to the DB, update the in-memory log list.
+			UpdateLogList(newctlog)
 
-		// If any log has been added or removed to the DB, update the in-memory log list.
-		UpdateLogList(newctlog)
+			// Query the logs for new STHs.
+			if updatedLogs := GetSTHs(); len(updatedLogs) > 0 {
+				// For each new STH observed, update the corresponding CT log record on the DB.
+				var tx pgx.Tx
+				if tx, err = certwatch.BeginUpdateConfig(); err == nil {
+					defer tx.Rollback(context.Background())
 
-		// Query the logs for new STHs.
-		if updatedLogs := GetSTHs(); len(updatedLogs) > 0 {
-			// For each new STH observed, update the corresponding CT log record on the DB.
-			var tx pgx.Tx
-			if tx, err = certwatch.BeginUpdateConfig(); err == nil {
-				defer tx.Rollback(context.Background())
-
-				if _, err = tx.Exec(context.Background(), `
+					if _, err = tx.Exec(context.Background(), `
 CREATE TEMP TABLE getsth_update_temp (
 	CT_LOG_ID integer,
 	TREE_SIZE bigint,
@@ -69,24 +66,25 @@ CREATE TEMP TABLE getsth_update_temp (
 	LATEST_UPDATE timestamp
 ) ON COMMIT DROP
 `); err == nil {
-					if _, err = tx.CopyFrom(
-						context.Background(),
-						pgx.Identifier{"getsth_update_temp"},
-						[]string{"ct_log_id", "tree_size", "latest_sth_timestamp", "latest_update"},
-						pgx.CopyFromSlice(len(updatedLogs), func(i int) ([]any, error) {
-							return []any{updatedLogs[i].Id, updatedLogs[i].TreeSize, updatedLogs[i].LatestSTHTimestamp, updatedLogs[i].LatestUpdate}, nil
-						}),
-					); err == nil {
-						if _, err = tx.Exec(context.Background(), "SELECT getsth_update()"); err == nil {
-							err = tx.Commit(context.Background())
+						if _, err = tx.CopyFrom(
+							context.Background(),
+							pgx.Identifier{"getsth_update_temp"},
+							[]string{"ct_log_id", "tree_size", "latest_sth_timestamp", "latest_update"},
+							pgx.CopyFromSlice(len(updatedLogs), func(i int) ([]any, error) {
+								return []any{updatedLogs[i].Id, updatedLogs[i].TreeSize, updatedLogs[i].LatestSTHTimestamp, updatedLogs[i].LatestUpdate}, nil
+							}),
+						); err == nil {
+							if _, err = tx.Exec(context.Background(), "SELECT getsth_update()"); err == nil {
+								err = tx.Commit(context.Background())
+							}
 						}
 					}
 				}
 			}
+		}
 
-			if err != nil {
-				certwatch.LogPostgresError(err)
-			}
+		if err != nil {
+			certwatch.LogPostgresError(err)
 		}
 	}
 
