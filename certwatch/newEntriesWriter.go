@@ -390,7 +390,7 @@ func writeCtLogEntries(payload ctLogEntryPayload) {
 done:
 	if err == nil {
 		ctLogEntryDuration := time.Since(ctLogEntryStart)
-		logger.Logger.Info("Wrote ct_log_entry records",
+		logger.Logger.Info("Records written",
 			zap.Int("nEntries", len(payload.ctLogEntriesToCopy)),
 			zap.Int("nQueued", len(msg.WriterChan)),
 			zap.Int("nCertsIndividuallyInserted", payload.nCertsIndividuallyInserted),
