@@ -80,17 +80,17 @@ func getSTH(i int) Log {
 			httpRequest.Header.Set("User-Agent", "github.com/crtsh/ct_monitor")
 			var httpResponse *http.Response
 			if httpResponse, err = httpClient.Do(httpRequest); err != nil {
-				logger.Logger.Error("httpClient.Do failed", zap.Error(err))
+				logger.Logger.Warn("httpClient.Do failed", zap.Error(err))
 			} else {
 				defer httpResponse.Body.Close()
 				var body []byte
 				var getSTH ctgo.GetSTHResponse
 				if body, err = io.ReadAll(httpResponse.Body); err != nil {
-					logger.Logger.Error("io.ReadAll failed", zap.Error(err))
+					logger.Logger.Warn("io.ReadAll failed", zap.Error(err))
 				} else if httpResponse.StatusCode != http.StatusOK {
-					logger.Logger.Error(fmt.Sprintf("HTTP %d", httpResponse.StatusCode), zap.Error(err))
+					logger.Logger.Warn(fmt.Sprintf("HTTP %d", httpResponse.StatusCode), zap.Error(err))
 				} else if err = json.Unmarshal(body, &getSTH); err != nil {
-					logger.Logger.Error("json.Unmarshal failed", zap.Error(err))
+					logger.Logger.Warn("json.Unmarshal failed", zap.Error(err))
 				} else {
 					// Report if this STH is newer than the previous STH we observed.
 					var thisSTHTimestamp time.Time
@@ -105,8 +105,9 @@ func getSTH(i int) Log {
 
 					var sth *ctgo.SignedTreeHead
 					if sth, err = getSTH.ToSignedTreeHead(); err != nil {
-						logger.Logger.Error(
+						logger.Logger.Warn(
 							"ToSignedTreeHead failed",
+							zap.Error(err),
 						)
 					}
 
@@ -123,14 +124,15 @@ func getSTH(i int) Log {
 					updatedLog.LatestUpdate = time.Now().UTC() // We update this field every time we successfully complete a get-sth call.
 					// Verify STH signature.
 					if err = updatedLog.SigVer.VerifySTHSignature(*sth); err != nil {
-						logger.Logger.Error(
+						logger.Logger.Warn(
 							"Invalid STH Signature",
 							zap.String("logURL", logURL),
 							zap.Time("sthTimestamp", thisSTHTimestamp),
 							zap.Uint64("treeSize", getSTH.TreeSize),
+							zap.Error(err),
 						)
 					} else if time.Since(thisSTHTimestamp) > (time.Duration(updatedLog.MMDInSeconds) * time.Second) {
-						logger.Logger.Error(
+						logger.Logger.Warn(
 							"STH Timestamp older than MMD",
 							zap.String("logURL", logURL),
 							zap.Time("sthTimestamp", thisSTHTimestamp),
@@ -155,14 +157,14 @@ func getSTH(i int) Log {
 			httpRequest.Header.Set("User-Agent", "github.com/crtsh/ct_monitor")
 			var httpResponse *http.Response
 			if httpResponse, err = httpClient.Do(httpRequest); err != nil {
-				logger.Logger.Error("httpClient.Do failed", zap.Error(err))
+				logger.Logger.Warn("httpClient.Do failed", zap.Error(err))
 			} else {
 				defer httpResponse.Body.Close()
 				var body []byte
 				if body, err = io.ReadAll(httpResponse.Body); err != nil {
-					logger.Logger.Error("io.ReadAll failed", zap.Error(err))
+					logger.Logger.Warn("io.ReadAll failed", zap.Error(err))
 				} else if httpResponse.StatusCode != http.StatusOK {
-					logger.Logger.Error(fmt.Sprintf("HTTP %d", httpResponse.StatusCode), zap.Error(err))
+					logger.Logger.Warn(fmt.Sprintf("HTTP %d", httpResponse.StatusCode), zap.Error(err))
 				} else {
 					// Copy the updated checkpoint details.
 					syncMutex.Lock()
@@ -170,15 +172,15 @@ func getSTH(i int) Log {
 					if updatedLog == nil {
 						panic(fmt.Errorf("ctlog[%d] unexpectedly nil", i))
 					} else if n, err := note.Open(body, ctlog[i].NoteVerifiers); err != nil {
-						logger.Logger.Error("note.Open failed", zap.Error(err))
+						logger.Logger.Warn("note.Open failed", zap.Error(err))
 					} else if len(n.Sigs) < 1 {
-						logger.Logger.Error("No verified STH note signatures")
+						logger.Logger.Warn("No verified STH note signatures")
 					} else if checkpoint, err := sunlight.ParseCheckpoint(n.Text); err != nil {
-						logger.Logger.Error("sunlight.ParseCheckpoint failed", zap.Error(err))
+						logger.Logger.Warn("sunlight.ParseCheckpoint failed", zap.Error(err))
 					} else if checkpoint.Origin != ctlog[i].KeyName {
-						logger.Logger.Error("Unexpected checkpoint origin")
+						logger.Logger.Warn("Unexpected checkpoint origin")
 					} else if decodedSig, err := base64.StdEncoding.DecodeString(n.Sigs[0].Base64); err != nil {
-						logger.Logger.Error("base64.StdEncoding.DecodeString failed", zap.Error(err))
+						logger.Logger.Warn("base64.StdEncoding.DecodeString failed", zap.Error(err))
 					} else {
 						thisSTHTimestamp := time.Unix(0, int64(binary.BigEndian.Uint64(decodedSig[4:12]))*int64(time.Millisecond)).UTC()
 						if thisSTHTimestamp.After(latestSTHTimestamp) {
@@ -193,7 +195,7 @@ func getSTH(i int) Log {
 						}
 						updatedLog.LatestUpdate = time.Now().UTC() // We update this field every time we successfully complete a checkpoint call.
 						if time.Since(thisSTHTimestamp) > (time.Duration(updatedLog.MMDInSeconds) * time.Second) {
-							logger.Logger.Error(
+							logger.Logger.Warn(
 								"STH Timestamp older than MMD",
 								zap.String("logURL", logURL),
 								zap.Time("sthTimestamp", thisSTHTimestamp),
