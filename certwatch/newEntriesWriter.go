@@ -23,7 +23,7 @@ import (
 type flushPayload struct {
 	entriesToCopy              [][]msg.NewLogEntry
 	ctLogEntriesToCopy         [][]any
-	nCertsIndividuallyImported int
+	nCertsIndividuallyInserted int
 }
 
 func NewEntriesWriter(ctx context.Context) {
@@ -36,14 +36,14 @@ func NewEntriesWriter(ctx context.Context) {
 	flushDone := make(chan struct{})
 	go func() {
 		for payload := range flushChan {
-			flushBatch(payload)
+			flushBatch(payload, flushChan)
 		}
 		close(flushDone)
 	}()
 
 	var entriesToCopy [][]msg.NewLogEntry
 	var ctLogEntriesToCopy [][]any
-	var nCertsIndividuallyImported int
+	var nCertsIndividuallyInserted int
 
 	// Partial-batch timer.  The timer is armed when the first entry is added to
 	// the current batch and stopped at handoff, so that the maximum delay
@@ -85,7 +85,7 @@ func NewEntriesWriter(ctx context.Context) {
 							subject.storedInDB = true
 							SetCachedIssuer(subject, nle.Sha256Cert)
 						}
-						nCertsIndividuallyImported++
+						nCertsIndividuallyInserted++
 					} else {
 						logger.Logger.Fatal("import_any_cert failed", zap.Error(err), zap.Binary("derCert", nle.DerCert), zap.Int32("issuerCAID", issuer.caID.Int32))
 					}
@@ -148,10 +148,10 @@ func NewEntriesWriter(ctx context.Context) {
 		flushChan <- flushPayload{
 			entriesToCopy:              entriesToCopy,
 			ctLogEntriesToCopy:         ctLogEntriesToCopy,
-			nCertsIndividuallyImported: nCertsIndividuallyImported,
+			nCertsIndividuallyInserted: nCertsIndividuallyInserted,
 		}
 		entriesToCopy = nil
-		nCertsIndividuallyImported = 0
+		nCertsIndividuallyInserted = 0
 	}
 }
 
@@ -160,18 +160,22 @@ func NewEntriesWriter(ctx context.Context) {
 // transactions, and finally COPYs the ct_log_entry rows.  It runs serialized
 // in its own goroutine so that the accumulator can continue draining
 // msg.WriterChan during the writes.
-func flushBatch(payload flushPayload) {
+func flushBatch(payload flushPayload, flushChan <-chan flushPayload) {
+	flushStart := time.Now()
 	entriesToCopy := payload.entriesToCopy
 	ctLogEntriesToCopy := payload.ctLogEntriesToCopy
 
 	chan_tx := make(chan pgx.Tx, config.Config.Writer.NumBackends)
 	chan_logEntries := make(chan []any, config.Config.Writer.NumBackends*config.Config.Writer.MaxBatchSize)
+	nCertsBulkInserted := make([]int, config.Config.Writer.NumBackends)
+	nCertsBulkDeduplicated := make([]int, config.Config.Writer.NumBackends)
 	var backendWG sync.WaitGroup
 	for i := 0; i < config.Config.Writer.NumBackends; i++ {
 		if len(entriesToCopy[i]) > 0 {
 			backendWG.Add(1)
 
 			go func(backend int) {
+				backendStart := time.Now()
 				// Deduplicate the leaf certificates to import in this batch.
 				certsCopied := make(map[[sha256.Size]byte]struct{})
 				certsReturned := make(map[[sha256.Size]byte]int64)
@@ -197,6 +201,7 @@ func flushBatch(payload flushPayload) {
 				var err error
 				var certID int64
 				var certSHA256Slice []byte
+				var isNewCert bool
 				var rows pgx.Rows
 				var tx pgx.Tx
 				if tx, err = connNewEntriesWriter[backend].Begin(context.Background()); err != nil {
@@ -226,10 +231,15 @@ CREATE TEMP TABLE importleafcerts_temp (
 					goto done
 				}
 				// Construct a SHA-256(Certificate) -> Certificate ID map of all the leaf certificates (new and old) in the temporary table.
-				if _, err = pgx.ForEachRow(rows, []any{&certID, &certSHA256Slice}, func() error {
+				if _, err = pgx.ForEachRow(rows, []any{&certID, &certSHA256Slice, &isNewCert}, func() error {
 					var certSHA256Array [sha256.Size]byte
 					copy(certSHA256Array[:], certSHA256Slice)
 					certsReturned[certSHA256Array] = certID
+					if isNewCert {
+						nCertsBulkInserted[backend]++
+					} else {
+						nCertsBulkDeduplicated[backend]++
+					}
 					return nil
 				}); err != nil {
 					goto done
@@ -247,7 +257,7 @@ CREATE TEMP TABLE importleafcerts_temp (
 
 			done:
 				if err == nil {
-					logger.Logger.Debug(fmt.Sprintf("#%d Wrote/Read certificate records", backend), zap.Int("nEntries", len(entriesToCopy[backend])))
+					logger.Logger.Debug(fmt.Sprintf("#%d Wrote/Read certificate records", backend), zap.Int("nEntries", len(entriesToCopy[backend])), zap.Int("nCertsInserted", nCertsBulkInserted[backend]), zap.Int("nCertsDeduplicated", nCertsBulkDeduplicated[backend]), zap.Duration("duration", time.Since(backendStart)))
 					chan_tx <- tx
 				} else {
 					LogPostgresError(err)
@@ -262,6 +272,7 @@ CREATE TEMP TABLE importleafcerts_temp (
 	}
 	// Wait for all of the backends to complete.
 	backendWG.Wait()
+	backendsDoneAt := time.Now()
 	close(chan_tx)
 
 	// Check whether or not all of the backends completed successfully.  Create a slice of transactions that will either need to be group-committed or group-rolled-back.
@@ -295,12 +306,16 @@ CREATE TEMP TABLE importleafcerts_temp (
 	if nErrors > 0 {
 		panic("One or more writer backends failed")
 	}
+	groupCommitDuration := time.Since(backendsDoneAt)
 
 	// Read the details of the required new ct_log_entry records that the backends sent through a channel.
 	close(chan_logEntries)
 	for entry := range chan_logEntries {
 		ctLogEntriesToCopy = append(ctLogEntriesToCopy, entry)
 	}
+
+	ctLogEntryStart := time.Now()
+	nextBatchPendingBefore := len(flushChan) > 0
 
 	// Start a transaction.
 	var tx pgx.Tx
@@ -317,7 +332,26 @@ CREATE TEMP TABLE importleafcerts_temp (
 
 done:
 	if err == nil {
-		logger.Logger.Info("Wrote ct_log_entry records", zap.Int("nEntries", len(ctLogEntriesToCopy)), zap.Int("nQueued", len(msg.WriterChan)), zap.Int("nCertsIndividuallyImported", payload.nCertsIndividuallyImported))
+		ctLogEntryDuration := time.Since(ctLogEntryStart)
+		nextBatchPendingAfter := len(flushChan) > 0
+		nCertsBulkInsertedTotal := 0
+		nCertsBulkDeduplicatedTotal := 0
+		for i := range nCertsBulkInserted {
+			nCertsBulkInsertedTotal += nCertsBulkInserted[i]
+			nCertsBulkDeduplicatedTotal += nCertsBulkDeduplicated[i]
+		}
+		logger.Logger.Info("Wrote ct_log_entry records",
+			zap.Int("nEntries", len(ctLogEntriesToCopy)),
+			zap.Int("nQueued", len(msg.WriterChan)),
+			zap.Int("nCertsIndividuallyInserted", payload.nCertsIndividuallyInserted),
+			zap.Int("nCertsBulkInserted", nCertsBulkInsertedTotal),
+			zap.Int("nCertsBulkDeduplicated", nCertsBulkDeduplicatedTotal),
+			zap.Duration("ctLogEntryCopyDuration", ctLogEntryDuration),
+			zap.Duration("groupCommitDuration", groupCommitDuration),
+			zap.Duration("totalFlushDuration", time.Since(flushStart)),
+			zap.Bool("nextBatchPendingBefore", nextBatchPendingBefore),
+			zap.Bool("nextBatchPendingAfter", nextBatchPendingAfter),
+		)
 	} else {
 		// An error occurred, and the application will need to be restarted so that no entries are missed.
 		if err2 := tx.Rollback(context.Background()); err2 != nil {
