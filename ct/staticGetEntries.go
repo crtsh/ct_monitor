@@ -36,6 +36,7 @@ func (ge *getEntries) callStaticGetEntries() {
 	syncMutex.RUnlock()
 
 	var processedEntries []msg.NewLogEntry
+	forceFullTile := false
 	for {
 		// Apply HTTP request rate-limiting.
 		syncMutex.RLock()
@@ -50,7 +51,7 @@ func (ge *getEntries) callStaticGetEntries() {
 		}
 
 		// Call this log's tile data API.
-		isPartialTileURL, tileDataURL, tileStart := determineTileDataURL(logURL, start, end)
+		isPartialTileURL, tileDataURL, tileStart := determineTileDataURL(logURL, start, end, forceFullTile)
 		var httpRequest *http.Request
 		var httpResponse *http.Response
 		var body []byte
@@ -67,6 +68,7 @@ func (ge *getEntries) callStaticGetEntries() {
 				defer httpResponse.Body.Close()
 				if httpResponse.StatusCode == http.StatusNotFound && isPartialTileURL {
 					logger.Logger.Info("Partial tile no longer present; will retry with full tile URL", zap.String("tileDataURL", tileDataURL), zap.Int64("start", start), zap.Int64("end", end))
+					forceFullTile = true
 					sleepFor = 30 * time.Second
 				} else if httpResponse.StatusCode != http.StatusOK {
 					logger.Logger.Warn(fmt.Sprintf("HTTP %d", httpResponse.StatusCode), zap.Error(err), zap.String("logURL", logURL), zap.Int64("start", start), zap.Int64("end", end))
@@ -139,10 +141,10 @@ func (ge *getEntries) callStaticGetEntries() {
 const TILE_HEIGHT = 8
 const ENTRIES_PER_TILE = 1 << TILE_HEIGHT
 
-func determineTileDataURL(logURL string, start, end int64) (bool, string, int64) {
+func determineTileDataURL(logURL string, start, end int64, forceFullTile bool) (bool, string, int64) {
 	tileNumber := start / ENTRIES_PER_TILE
 	tileStart := tileNumber * ENTRIES_PER_TILE
-	if nEntriesToFetch := end + 1 - tileStart; nEntriesToFetch < ENTRIES_PER_TILE {
+	if nEntriesToFetch := end + 1 - tileStart; nEntriesToFetch < ENTRIES_PER_TILE && !forceFullTile {
 		return true, fmt.Sprintf("%s/tile/data/%s.p/%d", logURL, tilePath(tileNumber), nEntriesToFetch), tileStart
 	} else {
 		return false, fmt.Sprintf("%s/tile/data/%s", logURL, tilePath(tileNumber)), tileStart
