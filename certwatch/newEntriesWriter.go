@@ -26,17 +26,45 @@ type flushPayload struct {
 	nCertsIndividuallyInserted int
 }
 
+// ctLogEntryPayload is handed from the flush (leaf) goroutine to the
+// ct_log_entry writer goroutine.  The leaf-cert transactions have already
+// been committed at this point, so the certificate_id values referenced by
+// these ct_log_entry rows are durable and the COPY can proceed independently
+// of (and concurrently with) the next batch's leaf-cert work.
+type ctLogEntryPayload struct {
+	ctLogEntriesToCopy          [][]any
+	nCertsIndividuallyInserted  int
+	nCertsBulkInsertedTotal     int
+	nCertsBulkDeduplicatedTotal int
+	leafFlushDuration           time.Duration
+	groupCommitDuration         time.Duration
+	flushChanPendingAfterLeaf   bool
+}
+
 func NewEntriesWriter(ctx context.Context) {
 	logger.Logger.Info("Started NewEntriesWriter")
 
-	// Spawn a single, persistent flush goroutine. Buffered at 1 so that the
-	// accumulator can finish preparing batch N+1 while batch N is still being
-	// written to the database.
+	// Spawn the ct_log_entry writer goroutine first; it consumes payloads
+	// produced by the flush (leaf) goroutine below.  Buffered at 1 so the
+	// leaf stage can prepare batch N+1 while batch N's ct_log_entry rows are
+	// still being COPYed by this stage.
+	ctLogEntryChan := make(chan ctLogEntryPayload, 1)
+	ctLogEntryDone := make(chan struct{})
+	go func() {
+		for payload := range ctLogEntryChan {
+			writeCtLogEntries(payload, ctLogEntryChan)
+		}
+		close(ctLogEntryDone)
+	}()
+
+	// Spawn a single, persistent flush (leaf-cert) goroutine. Buffered at 1
+	// so that the accumulator can finish preparing batch N+1 while batch N is
+	// still being written to the database.
 	flushChan := make(chan flushPayload, 1)
 	flushDone := make(chan struct{})
 	go func() {
 		for payload := range flushChan {
-			flushBatch(payload, flushChan)
+			flushBatch(payload, flushChan, ctLogEntryChan)
 		}
 		close(flushDone)
 	}()
@@ -123,12 +151,14 @@ func NewEntriesWriter(ctx context.Context) {
 
 		// Respond to graceful shutdown requests.
 		case <-ctx.Done():
-			// Let any in-flight flush complete, then exit.  Any entries currently
-			// buffered in entriesToCopy or msg.WriterChan are dropped and will be
-			// re-fetched on restart (the max(entry_id) per log on the DB is the
-			// resume point).
+			// Let any in-flight flush complete, then drain the ct_log_entry
+			// stage, then exit.  Any entries currently buffered in entriesToCopy
+			// or msg.WriterChan are dropped and will be re-fetched on restart
+			// (the max(entry_id) per log on the DB is the resume point).
 			close(flushChan)
 			<-flushDone
+			close(ctLogEntryChan)
+			<-ctLogEntryDone
 			msg.ShutdownWG.Done()
 			logger.Logger.Info("Stopped NewEntriesWriter")
 			return
@@ -155,12 +185,13 @@ func NewEntriesWriter(ctx context.Context) {
 	}
 }
 
-// flushBatch performs the database writes for one accumulated batch:
-// concurrently COPYs each backend's leaf certs, group-commits the resulting
-// transactions, and finally COPYs the ct_log_entry rows.  It runs serialized
-// in its own goroutine so that the accumulator can continue draining
-// msg.WriterChan during the writes.
-func flushBatch(payload flushPayload, flushChan <-chan flushPayload) {
+// flushBatch performs the leaf-cert database writes for one accumulated
+// batch: concurrently COPYs each backend's leaf certs, group-commits the
+// resulting transactions, and hands the assembled ct_log_entry rows off to
+// the ct_log_entry writer stage.  It runs serialized in its own goroutine so
+// that the accumulator can continue draining msg.WriterChan during the
+// writes.
+func flushBatch(payload flushPayload, flushChan <-chan flushPayload, ctLogEntryChan chan<- ctLogEntryPayload) {
 	flushStart := time.Now()
 	entriesToCopy := payload.entriesToCopy
 	ctLogEntriesToCopy := payload.ctLogEntriesToCopy
@@ -314,17 +345,46 @@ CREATE TEMP TABLE importleafcerts_temp (
 		ctLogEntriesToCopy = append(ctLogEntriesToCopy, entry)
 	}
 
+	// All leaf-cert transactions have committed, so the certificate_id values
+	// referenced by these ct_log_entry rows are durable.  Hand the batch off
+	// to the ct_log_entry writer stage and return immediately so that this
+	// goroutine can start processing the next leaf-cert batch.  The send
+	// blocks if the ct_log_entry stage is still busy with the previous batch,
+	// providing back-pressure that bounds memory use.
+	nCertsBulkInsertedTotal := 0
+	nCertsBulkDeduplicatedTotal := 0
+	for i := range nCertsBulkInserted {
+		nCertsBulkInsertedTotal += nCertsBulkInserted[i]
+		nCertsBulkDeduplicatedTotal += nCertsBulkDeduplicated[i]
+	}
+	flushChanPendingAfterLeaf := len(flushChan) > 0
+	ctLogEntryChan <- ctLogEntryPayload{
+		ctLogEntriesToCopy:          ctLogEntriesToCopy,
+		nCertsIndividuallyInserted:  payload.nCertsIndividuallyInserted,
+		nCertsBulkInsertedTotal:     nCertsBulkInsertedTotal,
+		nCertsBulkDeduplicatedTotal: nCertsBulkDeduplicatedTotal,
+		leafFlushDuration:           time.Since(flushStart),
+		groupCommitDuration:         groupCommitDuration,
+		flushChanPendingAfterLeaf:   flushChanPendingAfterLeaf,
+	}
+}
+
+// writeCtLogEntries performs the final ct_log_entry COPY for one batch.  It
+// runs on its own dedicated connection so that it can proceed in parallel
+// with the next batch's leaf-cert work (which uses connNewEntriesWriter[...]
+// connections).
+func writeCtLogEntries(payload ctLogEntryPayload, ctLogEntryChan <-chan ctLogEntryPayload) {
 	ctLogEntryStart := time.Now()
-	nextBatchPendingBefore := len(flushChan) > 0
 
 	// Start a transaction.
+	var err error
 	var tx pgx.Tx
-	if tx, err = connNewEntriesWriter[0].Begin(context.Background()); err != nil {
+	if tx, err = connCtLogEntryWriter.Begin(context.Background()); err != nil {
 		goto done
 	}
 
 	// Copy the new ct_log_entry rows.
-	if _, err = tx.CopyFrom(context.Background(), pgx.Identifier{"ct_log_entry"}, []string{"certificate_id", "entry_id", "entry_timestamp", "ct_log_id"}, pgx.CopyFromRows(ctLogEntriesToCopy)); err != nil {
+	if _, err = tx.CopyFrom(context.Background(), pgx.Identifier{"ct_log_entry"}, []string{"certificate_id", "entry_id", "entry_timestamp", "ct_log_id"}, pgx.CopyFromRows(payload.ctLogEntriesToCopy)); err != nil {
 		goto done
 	}
 
@@ -333,24 +393,18 @@ CREATE TEMP TABLE importleafcerts_temp (
 done:
 	if err == nil {
 		ctLogEntryDuration := time.Since(ctLogEntryStart)
-		nextBatchPendingAfter := len(flushChan) > 0
-		nCertsBulkInsertedTotal := 0
-		nCertsBulkDeduplicatedTotal := 0
-		for i := range nCertsBulkInserted {
-			nCertsBulkInsertedTotal += nCertsBulkInserted[i]
-			nCertsBulkDeduplicatedTotal += nCertsBulkDeduplicated[i]
-		}
+		ctLogEntryChanPendingAfterCtLog := len(ctLogEntryChan) > 0
 		logger.Logger.Info("Wrote ct_log_entry records",
-			zap.Int("nEntries", len(ctLogEntriesToCopy)),
+			zap.Int("nEntries", len(payload.ctLogEntriesToCopy)),
 			zap.Int("nQueued", len(msg.WriterChan)),
 			zap.Int("nCertsIndividuallyInserted", payload.nCertsIndividuallyInserted),
-			zap.Int("nCertsBulkInserted", nCertsBulkInsertedTotal),
-			zap.Int("nCertsBulkDeduplicated", nCertsBulkDeduplicatedTotal),
+			zap.Int("nCertsBulkInserted", payload.nCertsBulkInsertedTotal),
+			zap.Int("nCertsBulkDeduplicated", payload.nCertsBulkDeduplicatedTotal),
+			zap.Duration("leafFlushDuration", payload.leafFlushDuration),
+			zap.Duration("groupCommitDuration", payload.groupCommitDuration),
 			zap.Duration("ctLogEntryCopyDuration", ctLogEntryDuration),
-			zap.Duration("groupCommitDuration", groupCommitDuration),
-			zap.Duration("totalFlushDuration", time.Since(flushStart)),
-			zap.Bool("nextBatchPendingBefore", nextBatchPendingBefore),
-			zap.Bool("nextBatchPendingAfter", nextBatchPendingAfter),
+			zap.Bool("flushChanPendingAfterLeaf", payload.flushChanPendingAfterLeaf),
+			zap.Bool("ctLogEntryChanPendingAfterCtLog", ctLogEntryChanPendingAfterCtLog),
 		)
 	} else {
 		// An error occurred, and the application will need to be restarted so that no entries are missed.
