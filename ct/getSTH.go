@@ -25,7 +25,22 @@ import (
 var httpClient http.Client
 
 func init() {
-	httpClient = http.Client{Timeout: config.Config.CTLogs.HTTPTimeout}
+	// The default http.Transport caps idle keepalive connections at 2 per host,
+	// which forces a fresh TCP+TLS handshake for nearly every get-entries call
+	// when RequestsConcurrent for a log is larger than 2.  Build a tuned
+	// transport so that get-entries workers can reuse connections and (where
+	// the server supports it) multiplex over HTTP/2.
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.MaxIdleConns = 0         // unlimited total idle conns
+	tr.MaxIdleConnsPerHost = 64 // generous keepalive pool per log host
+	tr.MaxConnsPerHost = 0      // don't cap in-flight conns at the transport layer
+	tr.IdleConnTimeout = 90 * time.Second
+	tr.ForceAttemptHTTP2 = true
+
+	httpClient = http.Client{
+		Timeout:   config.Config.CTLogs.HTTPTimeout,
+		Transport: tr,
+	}
 }
 
 func GetSTHs() []Log {
