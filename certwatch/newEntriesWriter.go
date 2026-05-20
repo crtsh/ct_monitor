@@ -45,6 +45,17 @@ func NewEntriesWriter(ctx context.Context) {
 	var ctLogEntriesToCopy [][]any
 	var nCertsIndividuallyImported int
 
+	// Partial-batch timer.  The timer is armed when the first entry is added to
+	// the current batch and stopped at handoff, so that the maximum delay
+	// between an entry joining a batch and that batch being handed off is
+	// bounded by MaxBatchWait, regardless of whether further entries continue
+	// arriving.  Reusing one Timer (vs. time.After per iteration) avoids the
+	// allocation/GC cost of a fresh runtime timer on every WriterChan delivery.
+	batchTimer := time.NewTimer(config.Config.Writer.MaxBatchWait)
+	batchTimer.Stop()
+	defer batchTimer.Stop()
+	batchHasEntries := false
+
 	for {
 		if entriesToCopy == nil {
 			entriesToCopy = make([][]msg.NewLogEntry, config.Config.Writer.NumBackends)
@@ -82,6 +93,10 @@ func NewEntriesWriter(ctx context.Context) {
 				if nle.CtLogID != -1 {
 					// Add this entry to the list of ct_log_entry records that we need to COPY.
 					ctLogEntriesToCopy = append(ctLogEntriesToCopy, []any{subject.certID, nle.EntryID, nle.EntryTimestamp, nle.CtLogID})
+					if !batchHasEntries {
+						batchTimer.Reset(config.Config.Writer.MaxBatchWait)
+						batchHasEntries = true
+					}
 				}
 			} else { // Leaf (pre)certificate (that could be parsed) entry.
 				// Shard entries by the first byte of each SHA-256(Certificate) % the number of backends, to ensure that multiple instances of the same leaf (pre)certificate will be handled by the same backend.
@@ -89,6 +104,10 @@ func NewEntriesWriter(ctx context.Context) {
 
 				// Queue this leaf (pre)certificate entry to be COPYed.
 				entriesToCopy[backend] = append(entriesToCopy[backend], nle)
+				if !batchHasEntries {
+					batchTimer.Reset(config.Config.Writer.MaxBatchWait)
+					batchHasEntries = true
+				}
 
 				// If this backend's queue is full, hand the batch off to the flush goroutine.
 				if len(entriesToCopy[backend]) >= config.Config.Writer.MaxBatchSize {
@@ -97,13 +116,10 @@ func NewEntriesWriter(ctx context.Context) {
 			}
 
 		// Limit how long we wait for a partial write batch to be filled.
-		case <-time.After(config.Config.Writer.MaxBatchWait):
-			// If any entries are queued, hand them off now.
-			for i := 0; i < config.Config.Writer.NumBackends; i++ {
-				if len(entriesToCopy[i]) > 0 {
-					goto handoff
-				}
-			}
+		case <-batchTimer.C:
+			// The timer is only armed when the batch is non-empty, so we can hand
+			// off unconditionally.
+			goto handoff
 
 		// Respond to graceful shutdown requests.
 		case <-ctx.Done():
@@ -122,6 +138,10 @@ func NewEntriesWriter(ctx context.Context) {
 		continue
 
 	handoff:
+		// Stop the partial-batch timer; the next batch starts empty and will arm
+		// its own timer when its first entry arrives.
+		batchTimer.Stop()
+		batchHasEntries = false
 		// Hand off the current batch to the flush goroutine.  This send blocks if
 		// the flush goroutine is still processing the previous batch, providing
 		// back-pressure that bounds memory use to at most ~2 batches in flight.
