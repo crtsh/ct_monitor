@@ -23,6 +23,7 @@ var (
 	connLogConfigSyncer  *pgx.Conn
 	connDatabaseWatcher  *pgx.Conn
 	connIssuerFetcher    *pgx.Conn
+	connEntryAccumulator *pgx.Conn
 	connNewEntriesWriter []*pgx.Conn
 )
 
@@ -51,6 +52,8 @@ func init() {
 		LogPostgresFatal(err)
 	} else if connIssuerFetcher, err = pgx.ConnectConfig(context.Background(), pgxConfig); err != nil {
 		LogPostgresFatal(err)
+	} else if connEntryAccumulator, err = pgx.ConnectConfig(context.Background(), pgxConfig); err != nil {
+		LogPostgresFatal(err)
 	}
 	connNewEntriesWriter = make([]*pgx.Conn, config.Config.Writer.NumBackends)
 	for i := 0; i < config.Config.Writer.NumBackends; i++ {
@@ -62,7 +65,7 @@ func init() {
 	logger.Logger.Info(
 		"Connected to certwatch",
 		zap.String("connect_string", connectStringToLog),
-		zap.Int("connection_count", 3+config.Config.Writer.NumBackends), // LogConfigSyncer + DatabaseWatcher + IssuerFetcher + N*NewEntriesWriter.
+		zap.Int("connection_count", 4+config.Config.Writer.NumBackends), // LogConfigSyncer + DatabaseWatcher + IssuerFetcher + EntryAccumulator + N*NewEntriesWriter.
 		zap.Duration("elapsed_ns", time.Since(start)),
 	)
 }
@@ -79,6 +82,10 @@ func Close() {
 	}
 	if connIssuerFetcher != nil {
 		connIssuerFetcher.Close(context.Background())
+		n++
+	}
+	if connEntryAccumulator != nil {
+		connEntryAccumulator.Close(context.Background())
 		n++
 	}
 	if connNewEntriesWriter != nil {
