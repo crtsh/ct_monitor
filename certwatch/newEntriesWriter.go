@@ -38,7 +38,6 @@ type ctLogEntryPayload struct {
 	nCertsBulkDeduplicatedTotal int
 	leafFlushDuration           time.Duration
 	groupCommitDuration         time.Duration
-	flushChanPendingAfterLeaf   bool
 }
 
 func NewEntriesWriter(ctx context.Context) {
@@ -52,7 +51,7 @@ func NewEntriesWriter(ctx context.Context) {
 	ctLogEntryDone := make(chan struct{})
 	go func() {
 		for payload := range ctLogEntryChan {
-			writeCtLogEntries(payload, ctLogEntryChan)
+			writeCtLogEntries(payload)
 		}
 		close(ctLogEntryDone)
 	}()
@@ -64,7 +63,7 @@ func NewEntriesWriter(ctx context.Context) {
 	flushDone := make(chan struct{})
 	go func() {
 		for payload := range flushChan {
-			flushBatch(payload, flushChan, ctLogEntryChan)
+			flushBatch(payload, ctLogEntryChan)
 		}
 		close(flushDone)
 	}()
@@ -191,7 +190,7 @@ func NewEntriesWriter(ctx context.Context) {
 // the ct_log_entry writer stage.  It runs serialized in its own goroutine so
 // that the accumulator can continue draining msg.WriterChan during the
 // writes.
-func flushBatch(payload flushPayload, flushChan <-chan flushPayload, ctLogEntryChan chan<- ctLogEntryPayload) {
+func flushBatch(payload flushPayload, ctLogEntryChan chan<- ctLogEntryPayload) {
 	flushStart := time.Now()
 	entriesToCopy := payload.entriesToCopy
 	ctLogEntriesToCopy := payload.ctLogEntriesToCopy
@@ -357,7 +356,6 @@ CREATE TEMP TABLE importleafcerts_temp (
 		nCertsBulkInsertedTotal += nCertsBulkInserted[i]
 		nCertsBulkDeduplicatedTotal += nCertsBulkDeduplicated[i]
 	}
-	flushChanPendingAfterLeaf := len(flushChan) > 0
 	ctLogEntryChan <- ctLogEntryPayload{
 		ctLogEntriesToCopy:          ctLogEntriesToCopy,
 		nCertsIndividuallyInserted:  payload.nCertsIndividuallyInserted,
@@ -365,7 +363,6 @@ CREATE TEMP TABLE importleafcerts_temp (
 		nCertsBulkDeduplicatedTotal: nCertsBulkDeduplicatedTotal,
 		leafFlushDuration:           time.Since(flushStart),
 		groupCommitDuration:         groupCommitDuration,
-		flushChanPendingAfterLeaf:   flushChanPendingAfterLeaf,
 	}
 }
 
@@ -373,7 +370,7 @@ CREATE TEMP TABLE importleafcerts_temp (
 // runs on its own dedicated connection so that it can proceed in parallel
 // with the next batch's leaf-cert work (which uses connNewEntriesWriter[...]
 // connections).
-func writeCtLogEntries(payload ctLogEntryPayload, ctLogEntryChan <-chan ctLogEntryPayload) {
+func writeCtLogEntries(payload ctLogEntryPayload) {
 	ctLogEntryStart := time.Now()
 
 	// Start a transaction.
@@ -393,7 +390,6 @@ func writeCtLogEntries(payload ctLogEntryPayload, ctLogEntryChan <-chan ctLogEnt
 done:
 	if err == nil {
 		ctLogEntryDuration := time.Since(ctLogEntryStart)
-		ctLogEntryChanPendingAfterCtLog := len(ctLogEntryChan) > 0
 		logger.Logger.Info("Wrote ct_log_entry records",
 			zap.Int("nEntries", len(payload.ctLogEntriesToCopy)),
 			zap.Int("nQueued", len(msg.WriterChan)),
@@ -403,8 +399,6 @@ done:
 			zap.Duration("leafFlushDuration", payload.leafFlushDuration),
 			zap.Duration("groupCommitDuration", payload.groupCommitDuration),
 			zap.Duration("ctLogEntryCopyDuration", ctLogEntryDuration),
-			zap.Bool("flushChanPendingAfterLeaf", payload.flushChanPendingAfterLeaf),
-			zap.Bool("ctLogEntryChanPendingAfterCtLog", ctLogEntryChanPendingAfterCtLog),
 		)
 	} else {
 		// An error occurred, and the application will need to be restarted so that no entries are missed.
