@@ -22,6 +22,8 @@ import (
 )
 
 func (ge *getEntries) callStaticGetEntries() {
+	defer getEntriesWG.Done()
+
 	// Get relevant log details.
 	syncMutex.RLock()
 	if ctlog[ge.ctLogID] == nil {
@@ -40,7 +42,11 @@ func (ge *getEntries) callStaticGetEntries() {
 		tt := ctlog[ge.ctLogID].rateLimiter
 		syncMutex.RUnlock()
 		if tt != nil {
-			<-tt.C
+			select {
+			case <-tt.C:
+			case <-ge.ctx.Done():
+				return
+			}
 		}
 
 		// Call this log's tile data API.
@@ -51,7 +57,7 @@ func (ge *getEntries) callStaticGetEntries() {
 		nextEntryNumber := int64(-1)
 		var err error
 		sleepFor := 2 * time.Second
-		if httpRequest, err = http.NewRequest(http.MethodGet, tileDataURL, nil); err != nil {
+		if httpRequest, err = http.NewRequestWithContext(ge.ctx, http.MethodGet, tileDataURL, nil); err != nil {
 			logger.Logger.Error("http.NewRequest failed", zap.Error(err))
 		} else {
 			httpRequest.Header.Set("User-Agent", "github.com/crtsh/ct_monitor")
@@ -86,13 +92,23 @@ func (ge *getEntries) callStaticGetEntries() {
 			panic("Too many entries found in tile data response!")
 		}
 
-		time.Sleep(sleepFor)
+		if !ctxSleep(ge.ctx, sleepFor) {
+			return
+		}
 	}
 
 	// Wait for serialized access, then write the newly processed entries to the newEntryWriter.
-	<-chan_serialize
+	select {
+	case <-chan_serialize:
+	case <-ge.ctx.Done():
+		return
+	}
 	for _, entry := range processedEntries {
-		msg.WriterChan <- entry
+		select {
+		case msg.WriterChan <- entry:
+		case <-ge.ctx.Done():
+			return
+		}
 	}
 
 	// Signal the next get-entries call to proceed with serialized access.
@@ -108,7 +124,9 @@ func (ge *getEntries) callStaticGetEntries() {
 			break
 		} else { // Next get-entries call not yet launched, so wait then retry.
 			syncMutex.RUnlock()
-			time.Sleep(config.Config.CTLogs.GetEntriesLauncherFrequency)
+			if !ctxSleep(ge.ctx, config.Config.CTLogs.GetEntriesLauncherFrequency) {
+				return
+			}
 		}
 	}
 
