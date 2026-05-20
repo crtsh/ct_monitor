@@ -25,5 +25,5 @@ var (
 )
 
 func init() {
-	WriterChan = make(chan NewLogEntry, 32768*4)
+	WriterChan = make(chan NewLogEntry, 16384)
 }
