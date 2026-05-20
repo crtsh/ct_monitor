@@ -69,9 +69,9 @@ func (ge *getEntries) callStaticGetEntries() {
 					logger.Logger.Info("Partial tile no longer present; will retry with full tile URL", zap.String("tileDataURL", tileDataURL), zap.Int64("start", start), zap.Int64("end", end))
 					sleepFor = 30 * time.Second
 				} else if httpResponse.StatusCode != http.StatusOK {
-					logger.Logger.Error(fmt.Sprintf("HTTP %d", httpResponse.StatusCode), zap.Error(err), zap.String("logURL", logURL), zap.Int64("start", start), zap.Int64("end", end))
+					logger.Logger.Warn(fmt.Sprintf("HTTP %d", httpResponse.StatusCode), zap.Error(err), zap.String("logURL", logURL), zap.Int64("start", start), zap.Int64("end", end))
 				} else if body, err = io.ReadAll(httpResponse.Body); err != nil {
-					logger.Logger.Error("io.ReadAll failed", zap.Error(err), zap.String("logURL", logURL), zap.Int64("start", start), zap.Int64("end", end))
+					logger.Logger.Warn("io.ReadAll failed", zap.Error(err), zap.String("logURL", logURL), zap.Int64("start", start), zap.Int64("end", end))
 				} else {
 					logger.Logger.Debug("New Entries", zap.String("logURL", logURL), zap.Int64("start", start), zap.Int64("end", end))
 					nextEntryNumber = ge.processNewStaticEntries(logURL, body, start, end, tileStart, &processedEntries)
@@ -267,11 +267,11 @@ func getChainCertificate(logUrl string, sha256ChainCert [32]byte) []byte {
 			defer httpResponse.Body.Close()
 			var body []byte
 			if httpResponse.StatusCode != http.StatusOK {
-				logger.Logger.Error(fmt.Sprintf("HTTP %d", httpResponse.StatusCode), zap.Error(err), zap.String("url", issuerURL))
+				logger.Logger.Warn(fmt.Sprintf("HTTP %d", httpResponse.StatusCode), zap.Error(err), zap.String("url", issuerURL))
 			} else if ct := strings.SplitN(httpResponse.Header.Get("Content-Type"), ";", 2)[0]; ct != "application/pkix-cert" && ct != "application/octet-stream" {
-				logger.Logger.Error("Unexpected Content-Type", zap.String("wanted", "application/pkix-cert"), zap.String("got", ct))
+				logger.Logger.Warn("Unexpected Content-Type", zap.String("wanted", "application/pkix-cert"), zap.String("got", ct))
 			} else if body, err = io.ReadAll(httpResponse.Body); err != nil {
-				logger.Logger.Error("io.ReadAll failed", zap.Error(err), zap.String("url", issuerURL))
+				logger.Logger.Warn("io.ReadAll failed", zap.Error(err), zap.String("url", issuerURL))
 			} else {
 				logger.Logger.Debug("Chain certificate fetched", zap.Error(err), zap.String("url", issuerURL))
 				return body

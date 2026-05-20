@@ -58,13 +58,13 @@ func (ge *getEntries) callRFC6962GetEntries() {
 		} else {
 			httpRequest.Header.Set("User-Agent", "github.com/crtsh/ct_monitor")
 			if httpResponse, err = httpClient.Do(httpRequest); err != nil {
-				logger.Logger.Error("httpClient.Do failed", zap.Error(err))
+				logger.Logger.Warn("httpClient.Do failed", zap.Error(err))
 			} else {
 				defer httpResponse.Body.Close()
 				if httpResponse.StatusCode != http.StatusOK {
-					logger.Logger.Error(fmt.Sprintf("HTTP %d", httpResponse.StatusCode), zap.Error(err), zap.String("logURL", logURL), zap.Int64("start", start), zap.Int64("end", end))
+					logger.Logger.Warn(fmt.Sprintf("HTTP %d", httpResponse.StatusCode), zap.Error(err), zap.String("logURL", logURL), zap.Int64("start", start), zap.Int64("end", end))
 				} else if body, err = io.ReadAll(httpResponse.Body); err != nil {
-					logger.Logger.Error("io.ReadAll failed", zap.Error(err), zap.String("logURL", logURL), zap.Int64("start", start), zap.Int64("end", end))
+					logger.Logger.Warn("io.ReadAll failed", zap.Error(err), zap.String("logURL", logURL), zap.Int64("start", start), zap.Int64("end", end))
 				} else {
 					logger.Logger.Debug("New Entries", zap.String("logURL", logURL), zap.Int64("start", start), zap.Int64("end", end))
 					nextEntryNumber = ge.processNewRFC6962Entries(logURL, body, start, &processedEntries)
