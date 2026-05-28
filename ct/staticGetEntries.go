@@ -62,7 +62,7 @@ func (ge *getEntries) callStaticGetEntries() {
 			logger.Logger.Error("http.NewRequest failed", zap.Error(err))
 		} else {
 			httpRequest.Header.Set("User-Agent", "github.com/crtsh/ct_monitor")
-			if httpResponse, err = httpClient.Do(httpRequest); err != nil {
+			if httpResponse, err = httpClientForURL(logURL).Do(httpRequest); err != nil {
 				logger.Logger.Warn("Tile fetch failed", zap.String("tile_data_url", tileDataURL), zap.Error(err))
 			} else {
 				defer httpResponse.Body.Close()
@@ -263,7 +263,7 @@ func getChainCertificate(logUrl string, sha256ChainCert [32]byte) []byte {
 		logger.Logger.Error("http.NewRequest failed", zap.Error(err))
 	} else {
 		httpRequest.Header.Set("User-Agent", "github.com/crtsh/ct_monitor")
-		if httpResponse, err = httpClient.Do(httpRequest); err != nil {
+		if httpResponse, err = httpClientForURL(logUrl).Do(httpRequest); err != nil {
 			logger.Logger.Warn("Chain certificate fetch failed", zap.Error(err), zap.String("url", issuerURL))
 		} else {
 			defer httpResponse.Body.Close()

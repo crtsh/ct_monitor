@@ -57,7 +57,7 @@ func (ge *getEntries) callRFC6962GetEntries() {
 			logger.Logger.Error("http.NewRequest failed", zap.Error(err))
 		} else {
 			httpRequest.Header.Set("User-Agent", "github.com/crtsh/ct_monitor")
-			if httpResponse, err = httpClient.Do(httpRequest); err != nil {
+			if httpResponse, err = httpClientForURL(logURL).Do(httpRequest); err != nil {
 				logger.Logger.Warn("httpClient.Do failed", zap.Error(err))
 			} else {
 				defer httpResponse.Body.Close()

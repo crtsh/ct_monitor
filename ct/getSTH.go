@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 )
 
 var httpClient http.Client
+var httpClientNoKeepAlive http.Client
 
 func init() {
 	// The default http.Transport caps idle keepalive connections at 2 per host,
@@ -41,6 +43,21 @@ func init() {
 		Timeout:   config.Config.CTLogs.HTTPTimeout,
 		Transport: tr,
 	}
+
+	trNoKeepAlive := http.DefaultTransport.(*http.Transport).Clone()
+	trNoKeepAlive.DisableKeepAlives = true
+
+	httpClientNoKeepAlive = http.Client{
+		Timeout:   config.Config.CTLogs.HTTPTimeout,
+		Transport: trNoKeepAlive,
+	}
+}
+
+func httpClientForURL(url string) *http.Client {
+	if strings.Contains(url, "digicert") {
+		return &httpClientNoKeepAlive
+	}
+	return &httpClient
 }
 
 func GetSTHs() []Log {
@@ -94,7 +111,7 @@ func getSTH(i int) Log {
 		} else {
 			httpRequest.Header.Set("User-Agent", "github.com/crtsh/ct_monitor")
 			var httpResponse *http.Response
-			if httpResponse, err = httpClient.Do(httpRequest); err != nil {
+			if httpResponse, err = httpClientForURL(logURL).Do(httpRequest); err != nil {
 				logger.Logger.Warn("httpClient.Do failed", zap.Error(err))
 			} else {
 				defer httpResponse.Body.Close()
@@ -171,7 +188,7 @@ func getSTH(i int) Log {
 		} else {
 			httpRequest.Header.Set("User-Agent", "github.com/crtsh/ct_monitor")
 			var httpResponse *http.Response
-			if httpResponse, err = httpClient.Do(httpRequest); err != nil {
+			if httpResponse, err = httpClientForURL(logURL).Do(httpRequest); err != nil {
 				logger.Logger.Warn("httpClient.Do failed", zap.Error(err))
 			} else {
 				defer httpResponse.Body.Close()
