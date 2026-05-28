@@ -44,7 +44,7 @@ func init() {
 		Transport: tr,
 	}
 
-	trNoKeepAlive := http.DefaultTransport.(*http.Transport).Clone()
+	trNoKeepAlive := tr.Clone()
 	trNoKeepAlive.DisableKeepAlives = true
 
 	httpClientNoKeepAlive = http.Client{
