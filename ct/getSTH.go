@@ -44,8 +44,9 @@ func init() {
 		Transport: tr,
 	}
 
-	trNoKeepAlive := tr.Clone()
+	trNoKeepAlive := http.DefaultTransport.(*http.Transport).Clone()
 	trNoKeepAlive.DisableKeepAlives = true
+	trNoKeepAlive.ForceAttemptHTTP2 = true
 
 	httpClientNoKeepAlive = http.Client{
 		Timeout:   config.Config.CTLogs.HTTPTimeout,
