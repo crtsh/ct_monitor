@@ -2,6 +2,7 @@ package ct
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -77,11 +78,10 @@ func launchGetEntries(ctx context.Context) time.Duration {
 					ge.chan_serialize <- struct{}{}
 				}
 				getEntriesWG.Add(1)
-				switch ctl.Type {
-				case "rfc6962":
-					go ge.callRFC6962GetEntries()
-				case "static":
+				if ctl.Type == "static" || strings.Contains(ctl.Url, "trustasia.com/log2026") {
 					go ge.callStaticGetEntries()
+				} else {
+					go ge.callRFC6962GetEntries()
 				}
 			}
 		}
