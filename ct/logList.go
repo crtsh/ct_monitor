@@ -38,6 +38,7 @@ type Log struct {
 	latestQueuedEntryID int64
 	LatestStoredEntryID int64
 	getEntries          map[int64]*getEntries
+	httpInFlight        int
 	isActive            bool
 	isTestLog           bool
 }

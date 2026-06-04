@@ -51,7 +51,7 @@ func launchGetEntries(ctx context.Context) time.Duration {
 	syncMutex.Lock()
 	for id, ctl := range ctlog {
 		if ctl.isActive && !ctl.isTestLog {
-			for j := len(ctl.getEntries); j < ctl.RequestsConcurrent && (ctl.latestQueuedEntryID < (ctl.TreeSize - 1)); j++ {
+			for j := ctl.httpInFlight; j < ctl.RequestsConcurrent && (ctl.latestQueuedEntryID < (ctl.TreeSize - 1)); j++ {
 				// Prepare a new get-entries call.
 				ge := getEntries{
 					ctx:            ctx,
@@ -78,6 +78,7 @@ func launchGetEntries(ctx context.Context) time.Duration {
 					ge.chan_serialize <- struct{}{}
 				}
 				getEntriesWG.Add(1)
+				ctl.httpInFlight++
 				if ctl.Type == "static" || strings.Contains(ctl.Url, "trustasia.com/log2026") {
 					go ge.callStaticGetEntries()
 				} else {

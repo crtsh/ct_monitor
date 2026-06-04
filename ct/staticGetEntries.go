@@ -35,6 +35,18 @@ func (ge *getEntries) callStaticGetEntries() {
 	chan_serialize := ge.chan_serialize
 	syncMutex.RUnlock()
 
+	// Ensure the HTTP concurrency slot is released on all exit paths.
+	httpSlotReleased := false
+	releaseHTTPSlot := func() {
+		if !httpSlotReleased {
+			httpSlotReleased = true
+			syncMutex.Lock()
+			ctlog[ge.ctLogID].httpInFlight--
+			syncMutex.Unlock()
+		}
+	}
+	defer releaseHTTPSlot()
+
 	var processedEntries []msg.NewLogEntry
 	forceFullTile := false
 	for {
@@ -98,6 +110,10 @@ func (ge *getEntries) callStaticGetEntries() {
 			return
 		}
 	}
+
+	// HTTP fetch complete — release the concurrency slot so the launcher can
+	// start new fetches while this goroutine waits for serialization.
+	releaseHTTPSlot()
 
 	// Wait for serialized access, then write the newly processed entries to the newEntryWriter.
 	select {
