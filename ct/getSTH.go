@@ -128,11 +128,18 @@ func getSTH(i int) Log {
 					// Report if this STH is newer than the previous STH we observed.
 					var thisSTHTimestamp time.Time
 					if thisSTHTimestamp = time.Unix(0, int64(getSTH.Timestamp)*int64(time.Millisecond)).UTC(); thisSTHTimestamp.After(latestSTHTimestamp) {
+						syncMutex.RLock()
+						httpInFlight := ctlog[i].httpInFlight
+						getEntriesMapLen := len(ctlog[i].getEntries)
+						syncMutex.RUnlock()
 						logger.Logger.Info(
 							"New STH",
 							zap.String("logURL", logURL),
 							zap.Time("sthTimestamp", thisSTHTimestamp),
 							zap.Uint64("treeSize", getSTH.TreeSize),
+							zap.Int("httpInFlight", httpInFlight),
+							zap.Int("getEntriesMapLen", getEntriesMapLen),
+							zap.Int("awaitingSerialization", getEntriesMapLen-httpInFlight),
 						)
 					}
 
@@ -222,6 +229,9 @@ func getSTH(i int) Log {
 								zap.String("logURL", logURL),
 								zap.Time("sthTimestamp", thisSTHTimestamp),
 								zap.Int64("treeSize", checkpoint.N),
+								zap.Int("httpInFlight", ctlog[i].httpInFlight),
+								zap.Int("getEntriesMapLen", len(ctlog[i].getEntries)),
+								zap.Int("awaitingSerialization", len(ctlog[i].getEntries)-ctlog[i].httpInFlight),
 							)
 							updatedLog.TreeSize = checkpoint.N
 							updatedLog.LatestSTHTimestamp = thisSTHTimestamp
