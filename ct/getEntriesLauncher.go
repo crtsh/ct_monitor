@@ -51,7 +51,7 @@ func launchGetEntries(ctx context.Context) time.Duration {
 	syncMutex.Lock()
 	for id, ctl := range ctlog {
 		if ctl.isActive && !ctl.isTestLog {
-			for j := ctl.httpInFlight; j < ctl.RequestsConcurrent && len(ctl.getEntries) < 2*ctl.RequestsConcurrent && (ctl.latestQueuedEntryID < (ctl.TreeSize - 1)); j++ {
+			for j := ctl.httpInFlight; (j < ctl.RequestsConcurrent) && (len(ctl.getEntries) < 2*ctl.RequestsConcurrent) && (ctl.latestQueuedEntryID < (ctl.TreeSize - 1)); j++ {
 				// Prepare a new get-entries call.
 				ge := getEntries{
 					ctx:            ctx,
